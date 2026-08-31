@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { UsersModule } from './modules/users/users.module';
+import { AvailabilityModule } from './modules/availability/availability.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { UsersModule } from './modules/users/users.module';
     TicketsModule,
     TeamsModule,
     UsersModule,
+    AvailabilityModule,
   ],
   controllers: [],
   providers: [],
