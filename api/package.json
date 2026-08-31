@@ -34,7 +34,6 @@
     "helmet": "^7.1.0",
     "class-validator": "^0.14.0",
     "class-transformer": "^0.5.1",
-    "nestjs-eventstore": "^3.0.0",
     "bull": "^4.11.5"
   },
   "devDependencies": {
