@@ -1,7 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
-import { Ticket } from './ticket.entity';
-import { Team } from './team.entity';
-import { AvailabilityRequest } from './availability-request.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('users')
 export class User {
@@ -11,7 +8,7 @@ export class User {
   @Column({ type: 'text' })
   name: string;
 
-  @Column({ type: 'citext', unique: true })
+  @Column({ type: 'text', unique: true })
   email: string;
 
   @Column({ type: 'text', nullable: true })
@@ -46,16 +43,4 @@ export class User {
 
   @UpdateDateColumn()
   updated_at: Date;
-
-  @ManyToOne(() => Team, (team) => team.members, { nullable: true })
-  team: Team;
-
-  @OneToMany(() => Ticket, (ticket) => ticket.requester)
-  created_tickets: Ticket[];
-
-  @OneToMany(() => Ticket, (ticket) => ticket.assigned_to_user)
-  assigned_tickets: Ticket[];
-
-  @OneToMany(() => AvailabilityRequest, (req) => req.user)
-  availability_requests: AvailabilityRequest[];
 }

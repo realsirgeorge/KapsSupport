@@ -21,9 +21,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'cd infra && docker-compose up',
+    command: 'cd infra && docker compose up',
     url: 'http://localhost',
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    timeout: 180 * 1000,
   },
 });

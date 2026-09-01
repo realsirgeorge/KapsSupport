@@ -1,11 +1,11 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 /**
  * User interface for authorization checks
  */
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string;
@@ -19,7 +19,7 @@ interface User {
 /**
  * Availability request interface
  */
-interface AvailabilityRequest {
+export interface AvailabilityRequest {
   id: string;
   user_id: string;
   type: 'range' | 'toggle';
@@ -42,16 +42,10 @@ interface AvailabilityRequest {
  */
 @Injectable()
 export class AvailabilityService {
-  private availabilityRequestsRepository: Repository<AvailabilityRequest>;
-  private usersRepository: Repository<User>;
-
   constructor(
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
-  ) {
-    this.availabilityRequestsRepository = this.dataSource.getRepository('availability_requests');
-    this.usersRepository = this.dataSource.getRepository('users');
-  }
+  ) {}
 
   /**
    * POST /availability-requests - Team Member requests leave
@@ -105,22 +99,24 @@ export class AvailabilityService {
     }
 
     // Check if user exists
-    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    const [user] = await this.dataSource.query('SELECT id FROM users WHERE id = $1', [userId]);
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
     // Create the availability request
-    const request = this.availabilityRequestsRepository.create({
-      user_id: userId,
-      type: data.type,
-      start_date: data.type === 'range' ? new Date(data.start_date!) : null,
-      end_date: data.type === 'range' ? new Date(data.end_date!) : null,
-      status: 'pending',
-      requested_at: new Date(),
-    });
-
-    await this.availabilityRequestsRepository.save(request);
+    const [request] = await this.dataSource.query(
+      `INSERT INTO availability_requests
+        (user_id, type, start_date, end_date, status, requested_at)
+       VALUES ($1, $2, $3, $4, 'pending', now())
+       RETURNING *`,
+      [
+        userId,
+        data.type,
+        data.type === 'range' ? data.start_date : null,
+        data.type === 'range' ? data.end_date : null,
+      ],
+    );
 
     // Emit event for audit logging
     this.eventEmitter.emit('availability.requested', {
@@ -141,38 +137,34 @@ export class AvailabilityService {
     user: User,
     filters?: { status?: string },
   ): Promise<{ data: AvailabilityRequest[]; total: number }> {
-    // Only Manager and Admin can list requests
-    // Team Member can see their own
-    let query = this.availabilityRequestsRepository.createQueryBuilder('ar');
+    const conditions: string[] = [];
+    const params: any[] = [];
 
     if (user.is_admin || user.is_support_triage) {
       // Admin and Support/Triage see all requests
-      // Query needs to join with users to see their team
-      query = query
-        .leftJoinAndSelect('ar.user_id', 'user')
-        .orderBy('ar.requested_at', 'DESC');
     } else if (user.team_id) {
       // Manager sees only own team's requests
-      // This requires joining users and checking team_id
-      query = query
-        .leftJoinAndSelect('ar.user_id', 'user')
-        .andWhere('user.team_id = :teamId', { teamId: user.team_id })
-        .orderBy('ar.requested_at', 'DESC');
+      params.push(user.team_id);
+      conditions.push(`ar.user_id IN (SELECT id FROM users WHERE team_id = $${params.length})`);
     } else {
       // Non-team-member without admin: only see own requests
-      query = query
-        .andWhere('ar.user_id = :userId', { userId: user.id })
-        .orderBy('ar.requested_at', 'DESC');
+      params.push(user.id);
+      conditions.push(`ar.user_id = $${params.length}`);
     }
 
-    // Apply status filter if provided
     if (filters?.status) {
-      query = query.andWhere('ar.status = :status', { status: filters.status });
+      params.push(filters.status);
+      conditions.push(`ar.status = $${params.length}`);
     }
 
-    const [data, total] = await query.getManyAndCount();
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    return { data, total };
+    const data = await this.dataSource.query(
+      `SELECT ar.* FROM availability_requests ar ${whereClause} ORDER BY ar.requested_at DESC`,
+      params,
+    );
+
+    return { data, total: data.length };
   }
 
   /**
@@ -185,18 +177,19 @@ export class AvailabilityService {
     requestId: string,
     approvingUser: User,
   ): Promise<AvailabilityRequest> {
-    const request = await this.availabilityRequestsRepository.findOne({
-      where: { id: requestId },
-    });
+    const [request] = await this.dataSource.query(
+      'SELECT * FROM availability_requests WHERE id = $1',
+      [requestId],
+    );
 
     if (!request) {
       throw new NotFoundException('Availability request not found');
     }
 
-    // Get the requesting user to check team membership
-    const requestingUser = await this.usersRepository.findOne({
-      where: { id: request.user_id },
-    });
+    const [requestingUser] = await this.dataSource.query(
+      'SELECT * FROM users WHERE id = $1',
+      [request.user_id],
+    );
 
     if (!requestingUser) {
       throw new NotFoundException('Requesting user not found');
@@ -213,24 +206,27 @@ export class AvailabilityService {
     }
 
     // Update request status
-    request.status = 'approved';
-    request.decided_by = approvingUser.id;
-    request.decided_at = new Date();
-
-    await this.availabilityRequestsRepository.save(request);
+    const [updatedRequest] = await this.dataSource.query(
+      `UPDATE availability_requests
+       SET status = 'approved', decided_by = $1, decided_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [approvingUser.id, requestId],
+    );
 
     // CRITICAL: Set is_unavailable=true (only write path for approval)
-    requestingUser.is_unavailable = true;
-    requestingUser.updated_at = new Date();
-    await this.usersRepository.save(requestingUser);
+    await this.dataSource.query(
+      'UPDATE users SET is_unavailable = true, updated_at = now() WHERE id = $1',
+      [requestingUser.id],
+    );
 
     // Emit event for audit logging
     this.eventEmitter.emit('availability.approved', {
-      request,
+      request: updatedRequest,
       actor_id: approvingUser.id,
     });
 
-    return request;
+    return updatedRequest;
   }
 
   /**
@@ -242,18 +238,19 @@ export class AvailabilityService {
     requestId: string,
     rejectingUser: User,
   ): Promise<AvailabilityRequest> {
-    const request = await this.availabilityRequestsRepository.findOne({
-      where: { id: requestId },
-    });
+    const [request] = await this.dataSource.query(
+      'SELECT * FROM availability_requests WHERE id = $1',
+      [requestId],
+    );
 
     if (!request) {
       throw new NotFoundException('Availability request not found');
     }
 
-    // Get the requesting user to check team membership
-    const requestingUser = await this.usersRepository.findOne({
-      where: { id: request.user_id },
-    });
+    const [requestingUser] = await this.dataSource.query(
+      'SELECT * FROM users WHERE id = $1',
+      [request.user_id],
+    );
 
     if (!requestingUser) {
       throw new NotFoundException('Requesting user not found');
@@ -270,19 +267,21 @@ export class AvailabilityService {
     }
 
     // Update request status (NO changes to is_unavailable)
-    request.status = 'rejected';
-    request.decided_by = rejectingUser.id;
-    request.decided_at = new Date();
-
-    await this.availabilityRequestsRepository.save(request);
+    const [updatedRequest] = await this.dataSource.query(
+      `UPDATE availability_requests
+       SET status = 'rejected', decided_by = $1, decided_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [rejectingUser.id, requestId],
+    );
 
     // Emit event for audit logging
     this.eventEmitter.emit('availability.rejected', {
-      request,
+      request: updatedRequest,
       actor_id: rejectingUser.id,
     });
 
-    return request;
+    return updatedRequest;
   }
 
   /**
@@ -298,18 +297,19 @@ export class AvailabilityService {
     requestId: string,
     endingUser: User,
   ): Promise<AvailabilityRequest> {
-    const request = await this.availabilityRequestsRepository.findOne({
-      where: { id: requestId },
-    });
+    const [request] = await this.dataSource.query(
+      'SELECT * FROM availability_requests WHERE id = $1',
+      [requestId],
+    );
 
     if (!request) {
       throw new NotFoundException('Availability request not found');
     }
 
-    // Get the requesting user
-    const requestingUser = await this.usersRepository.findOne({
-      where: { id: request.user_id },
-    });
+    const [requestingUser] = await this.dataSource.query(
+      'SELECT * FROM users WHERE id = $1',
+      [request.user_id],
+    );
 
     if (!requestingUser) {
       throw new NotFoundException('Requesting user not found');
@@ -333,25 +333,29 @@ export class AvailabilityService {
     }
 
     // Update request status
-    request.status = 'ended';
-    request.ended_at = new Date();
-
-    await this.availabilityRequestsRepository.save(request);
+    const [updatedRequest] = await this.dataSource.query(
+      `UPDATE availability_requests
+       SET status = 'ended', ended_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [requestId],
+    );
 
     // For toggle requests: set is_unavailable=false (only write path for toggle end)
     // For range requests: leave is_unavailable=true; worker job will auto-reset at end_date
     if (request.type === 'toggle') {
-      requestingUser.is_unavailable = false;
-      requestingUser.updated_at = new Date();
-      await this.usersRepository.save(requestingUser);
+      await this.dataSource.query(
+        'UPDATE users SET is_unavailable = false, updated_at = now() WHERE id = $1',
+        [requestingUser.id],
+      );
     }
 
     // Emit event for audit logging
     this.eventEmitter.emit('availability.ended', {
-      request,
+      request: updatedRequest,
       actor_id: endingUser.id,
     });
 
-    return request;
+    return updatedRequest;
   }
 }

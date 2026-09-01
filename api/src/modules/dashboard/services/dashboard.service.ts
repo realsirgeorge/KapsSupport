@@ -1,7 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
-interface User {
+export interface User {
   id: string;
   team_id?: string;
   is_admin: boolean;

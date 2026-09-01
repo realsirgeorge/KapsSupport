@@ -26,8 +26,8 @@ export class TicketsController {
   async listTickets(
     @Request() req,
     @Query('status') status?: string,
-    @Query('mine') mine?: boolean,
-    @Query('assigned_to_me') assigned_to_me?: boolean,
+    @Query('mine') mine?: string | boolean,
+    @Query('assigned_to_me') assigned_to_me?: string | boolean,
     @Query('team_id') team_id?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,

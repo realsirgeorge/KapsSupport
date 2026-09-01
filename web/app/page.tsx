@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { authApi } from '@/lib/api-client';
 
 export default function Home() {
   const router = useRouter();
@@ -11,19 +12,11 @@ export default function Home() {
     // Check if user is authenticated
     const checkAuth = async () => {
       try {
-        const response = await fetch('/api/auth/me', {
-          credentials: 'include',
-        });
-
-        if (response.ok) {
-          // User is authenticated, redirect to dashboard
-          router.push('/dashboard');
-        } else {
-          // Not authenticated, redirect to login
-          router.push('/login');
-        }
+        await authApi.me();
+        // User is authenticated, redirect to dashboard
+        router.push('/dashboard');
       } catch {
-        // Error checking auth, redirect to login
+        // Not authenticated, redirect to login
         router.push('/login');
       } finally {
         setIsLoading(false);

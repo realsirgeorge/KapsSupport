@@ -1,8 +1,11 @@
 .env
 *.env
+.env.local
+.env.*.local
 !.env.example
 node_modules/
 dist/
 build/
 .next/
 *.log
+.superpowers/

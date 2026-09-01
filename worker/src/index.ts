@@ -17,9 +17,9 @@ const db = new Pool({
 });
 
 // Define job queues
-const leaveExpiryQueue = new Queue('leave-expiry', redis);
-const attachmentValidationQueue = new Queue('attachment-validation', redis);
-const notificationQueue = new Queue('notifications', redis);
+const leaveExpiryQueue = new Queue('leave-expiry', { redis });
+const attachmentValidationQueue = new Queue('attachment-validation', { redis });
+const notificationQueue = new Queue('notifications', { redis });
 
 // Leave expiry job - runs daily to expire old leave requests
 leaveExpiryQueue.process(async (job) => {

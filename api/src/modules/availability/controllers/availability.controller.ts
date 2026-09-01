@@ -50,8 +50,8 @@ export class AvailabilityController {
    */
   @Get()
   async listRequests(
-    @Query('status') status?: string,
     @Request() req,
+    @Query('status') status?: string,
   ) {
     const result = await this.availabilityService.listRequests(req.user, { status });
     return {

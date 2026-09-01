@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { authApi } from '@/lib/api-client';
 
 export default function Login() {
   const router = useRouter();
@@ -16,20 +17,10 @@ export default function Login() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (response.ok) {
-        router.push('/dashboard');
-      } else {
-        setError('Invalid email or password');
-      }
+      await authApi.login(email, password);
+      router.push('/dashboard');
     } catch (err) {
-      setError('An error occurred. Please try again.');
+      setError('Invalid email or password');
     } finally {
       setIsLoading(false);
     }

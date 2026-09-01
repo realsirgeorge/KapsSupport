@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { authApi } from '@/lib/api-client';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -11,16 +12,8 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch('/api/auth/me', {
-          credentials: 'include',
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setUser(data.data);
-        } else {
-          router.push('/login');
-        }
+        const response = await authApi.me();
+        setUser(response.data.data);
       } catch {
         router.push('/login');
       } finally {
@@ -32,10 +25,7 @@ export default function Dashboard() {
   }, [router]);
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-    });
+    await authApi.logout();
     router.push('/login');
   };
 

@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 // Inline interfaces matching project pattern
-interface User {
+export interface User {
   id: string;
   email?: string;
   team_id?: string;
@@ -12,7 +12,7 @@ interface User {
   is_executive?: boolean;
 }
 
-interface Team {
+export interface Team {
   id: string;
   name: string;
   manager_id?: string | null;
@@ -21,7 +21,7 @@ interface Team {
   updated_at: Date;
 }
 
-interface Site {
+export interface Site {
   id: string;
   name: string;
   region?: string | null;
@@ -30,7 +30,7 @@ interface Site {
   updated_at: Date;
 }
 
-interface Category {
+export interface Category {
   id: string;
   name: string;
   team_id: string;
@@ -38,7 +38,7 @@ interface Category {
   updated_at: Date;
 }
 
-interface UserResponse {
+export interface UserResponse {
   id: string;
   email: string;
   name: string;

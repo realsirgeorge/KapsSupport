@@ -8,7 +8,7 @@ import {
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
-interface User {
+export interface User {
   id: string;
   email?: string;
   team_id?: string;

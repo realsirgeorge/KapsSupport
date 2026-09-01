@@ -1,5 +1,5 @@
 import { Injectable, ForbiddenException, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 export interface User {
@@ -9,7 +9,6 @@ export interface User {
   team_id?: string;
   is_admin: boolean;
   is_support_triage: boolean;
-  manages_team_id?: string;
 }
 
 export interface Ticket {
@@ -38,15 +37,22 @@ export interface TeamMember {
 
 @Injectable()
 export class ManagerService {
-  private ticketsRepository: Repository<Ticket>;
-  private usersRepository: Repository<User>;
-
   constructor(
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
-  ) {
-    this.ticketsRepository = this.dataSource.getRepository('tickets');
-    this.usersRepository = this.dataSource.getRepository('users');
+  ) {}
+
+  /**
+   * Returns the id of the team this user manages, or null.
+   * A user's "manages_team_id" is not stored on the user/JWT — it is derived
+   * from teams.manager_id, same pattern as DashboardService.
+   */
+  private async getManagerTeamId(userId: string): Promise<string | null> {
+    const [team] = await this.dataSource.query(
+      'SELECT id FROM teams WHERE manager_id = $1 LIMIT 1',
+      [userId],
+    );
+    return team ? team.id : null;
   }
 
   /**
@@ -54,7 +60,7 @@ export class ManagerService {
    * Used by: Support/Triage, Managers, Admin
    */
   async getTeamWorkload(teamId: string, user: User): Promise<{ data: TeamMember[] }> {
-    this.validateWorkloadAccess(teamId, user);
+    await this.validateWorkloadAccess(teamId, user);
 
     // Query: SELECT u.id, u.name, u.email, u.is_unavailable, COUNT(t.id) as open_tickets
     // FROM users u
@@ -92,7 +98,7 @@ export class ManagerService {
       per_member: Array<{ user_id: string; name: string; open_tickets: number; avg_resolution_hours: number }>;
     };
   }> {
-    this.validateTeamAccess(teamId, user);
+    await this.validateTeamAccess(teamId, user);
 
     // Get open tickets count
     const openResult = await this.dataSource.query(
@@ -192,7 +198,7 @@ export class ManagerService {
       limit?: number;
     },
   ): Promise<{ data: Ticket[]; total: number; page: number; limit: number }> {
-    this.validateTeamAccess(teamId, user);
+    await this.validateTeamAccess(teamId, user);
 
     let query = `
       SELECT t.*
@@ -237,7 +243,8 @@ export class ManagerService {
    * Response: 403 if trying to reassign outside team, 409 if assignee invalid
    */
   async reassign(ticketId: string, assigneeId: string, user: User): Promise<Ticket> {
-    if (!user.manages_team_id && !user.is_admin) {
+    const managerTeamId = await this.getManagerTeamId(user.id);
+    if (!managerTeamId && !user.is_admin) {
       throw new ForbiddenException('Only Manager can reassign');
     }
 
@@ -260,7 +267,7 @@ export class ManagerService {
     const ticketTeamId = ticketData.team_id;
 
     // Check if manager owns this team
-    if (!user.is_admin && user.manages_team_id !== ticketTeamId) {
+    if (!user.is_admin && managerTeamId !== ticketTeamId) {
       throw new ForbiddenException('Manager can only reassign within own team');
     }
 
@@ -311,7 +318,8 @@ export class ManagerService {
    * Sets confirmed_category_id to NULL and unassigns the ticket, making it reappear in triage queue
    */
   async returnToTriage(ticketId: string, user: User, reason?: string): Promise<Ticket> {
-    if (!user.manages_team_id && !user.is_admin) {
+    const managerTeamId = await this.getManagerTeamId(user.id);
+    if (!managerTeamId && !user.is_admin) {
       throw new ForbiddenException('Only Manager can return to triage');
     }
 
@@ -334,7 +342,7 @@ export class ManagerService {
     const ticketTeamId = ticketData.team_id;
 
     // Check if manager owns this team
-    if (!user.is_admin && user.manages_team_id !== ticketTeamId) {
+    if (!user.is_admin && managerTeamId !== ticketTeamId) {
       throw new ForbiddenException('Manager can only return tickets from own team');
     }
 
@@ -372,8 +380,12 @@ export class ManagerService {
    * Validate access for workload endpoint
    * Allowed: Support/Triage, Managers (own team), Admin
    */
-  private validateWorkloadAccess(teamId: string, user: User) {
-    if (!user.is_admin && !user.is_support_triage && user.manages_team_id !== teamId) {
+  private async validateWorkloadAccess(teamId: string, user: User) {
+    if (user.is_admin || user.is_support_triage) {
+      return;
+    }
+    const managerTeamId = await this.getManagerTeamId(user.id);
+    if (managerTeamId !== teamId) {
       throw new ForbiddenException('No access to this team workload');
     }
   }
@@ -382,8 +394,12 @@ export class ManagerService {
    * Validate access for stats and tickets endpoints
    * Allowed: Managers (own team), Admin
    */
-  private validateTeamAccess(teamId: string, user: User) {
-    if (!user.is_admin && user.manages_team_id !== teamId) {
+  private async validateTeamAccess(teamId: string, user: User) {
+    if (user.is_admin) {
+      return;
+    }
+    const managerTeamId = await this.getManagerTeamId(user.id);
+    if (managerTeamId !== teamId) {
       throw new ForbiddenException('Manager can only access own team');
     }
   }
