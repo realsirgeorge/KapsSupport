@@ -10,6 +10,7 @@
     "db:migrate": "typeorm migration:run -d dist/database/data-source.js",
     "db:migrate:dev": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli migration:run -d src/database/data-source.ts",
     "db:seed": "ts-node -r tsconfig-paths/register src/database/seed.ts",
+    "db:seed:expanded": "ts-node -r tsconfig-paths/register src/database/seed-expanded.ts",
     "db:generate": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli migration:generate -d src/database/data-source.ts",
     "db:revert": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli migration:revert -d src/database/data-source.ts",
     "lint": "eslint \"{src,test}/**/*.ts\"",
