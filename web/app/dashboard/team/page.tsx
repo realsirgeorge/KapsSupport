@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Inbox, Clock, AlertTriangle, Users } from 'lucide-react';
 import { teamApi, ticketApi, Ticket } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
+import { useRequireRole } from '@/hooks/use-require-role';
 import { useSearch } from '@/components/app/search-context';
 import { StatCard } from '@/components/app/stat-card';
 import { PageHeader } from '@/components/app/page-header';
@@ -33,8 +34,9 @@ interface Member {
 
 export default function TeamDashboardPage() {
   const user = useUser();
+  const allowed = useRequireRole(!!user.manages_team_id);
   const { query } = useSearch();
-  const teamId = user.manages_team_id!;
+  const teamId = user.manages_team_id ?? '';
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -57,8 +59,9 @@ export default function TeamDashboardPage() {
     });
 
   useEffect(() => {
+    if (!allowed) return;
     load().finally(() => setIsLoading(false));
-  }, [teamId]);
+  }, [allowed, teamId]);
 
   const reassign = async (ticketId: string, assigneeId: string) => {
     setReassignTarget(null);
@@ -79,7 +82,7 @@ export default function TeamDashboardPage() {
 
   const maxWorkload = Math.max(1, ...members.map((m) => m.open_tickets));
 
-  if (isLoading || !stats) {
+  if (!allowed || isLoading || !stats) {
     return <div className="text-muted-foreground">Loading...</div>;
   }
 

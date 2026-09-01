@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Inbox, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import { dashboardApi, ticketApi } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
+import { useRequireRole } from '@/hooks/use-require-role';
 import { StatCard } from '@/components/app/stat-card';
 import { Badge } from '@/components/ui/badge';
 import { WorkloadBar } from '@/components/app/workload-bar';
@@ -43,6 +44,7 @@ const STATUS_DOT: Record<string, string> = {
 
 export default function SystemDashboardPage() {
   const user = useUser();
+  const allowed = useRequireRole(user.is_admin || user.is_executive);
   const [data, setData] = useState<SystemData | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,7 +58,7 @@ export default function SystemDashboardPage() {
       .finally(() => setIsLoading(false));
   }, []);
 
-  if (isLoading || !data) {
+  if (!allowed || isLoading || !data) {
     return <div className="text-muted-foreground">Loading...</div>;
   }
 

@@ -47,8 +47,19 @@ export function navSections(user: CurrentUser): NavSection[] {
     sections.push({
       items: [{ label: 'System dashboard', href: '/dashboard/system', badgeKey: 'total_open' }],
     });
-    // Admin CRUD screens (Teams/Sites/Categories/Users) aren't built yet —
-    // omitted rather than linking to pages that don't exist.
+    // Admin CRUD is write access — Executive is read-only system-wide, so
+    // these links are Admin-only, not shown to Executives.
+    if (user.is_admin) {
+      sections.push({
+        heading: 'Admin',
+        items: [
+          { label: 'Teams', href: '/dashboard/admin/teams' },
+          { label: 'Sites', href: '/dashboard/admin/sites' },
+          { label: 'Categories', href: '/dashboard/admin/categories' },
+          { label: 'Users & roles', href: '/dashboard/admin/users' },
+        ],
+      });
+    }
     return sections;
   }
 
@@ -58,7 +69,10 @@ export function navSections(user: CurrentUser): NavSection[] {
     });
     sections.push({
       heading: 'Personal',
-      items: [{ label: 'My requests', href: '/dashboard/tickets' }],
+      items: [
+        { label: 'My requests', href: '/dashboard/tickets' },
+        { label: 'Availability', href: '/dashboard/availability' },
+      ],
     });
     return sections;
   }
@@ -79,7 +93,10 @@ export function navSections(user: CurrentUser): NavSection[] {
     });
     sections.push({
       heading: 'Personal',
-      items: [{ label: 'My requests', href: '/dashboard/tickets' }],
+      items: [
+        { label: 'My requests', href: '/dashboard/tickets' },
+        { label: 'Availability', href: '/dashboard/availability' },
+      ],
     });
     return sections;
   }

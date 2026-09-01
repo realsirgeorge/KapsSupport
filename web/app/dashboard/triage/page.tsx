@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Inbox, UserPlus, CheckCircle2 } from 'lucide-react';
 import { triageApi, teamApi, categoriesApi, dashboardApi, ticketApi, Ticket, Category } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
+import { useRequireRole } from '@/hooks/use-require-role';
 import { useSearch } from '@/components/app/search-context';
 import { StatCard } from '@/components/app/stat-card';
 import { PageHeader } from '@/components/app/page-header';
@@ -137,6 +138,7 @@ function TicketRow({
 
 export default function IncomingQueuePage() {
   const user = useUser();
+  const allowed = useRequireRole(user.is_support_triage || user.is_admin);
   const { query } = useSearch();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -181,7 +183,7 @@ export default function IncomingQueuePage() {
     return tickets.filter((t) => t.ticket_number.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q));
   }, [tickets, query]);
 
-  if (isLoading) {
+  if (!allowed || isLoading) {
     return <div className="text-muted-foreground">Loading...</div>;
   }
 

@@ -138,8 +138,8 @@ export const categoriesApi = {
 export const adminApi = {
   teams: {
     list: () => apiClient.get('/teams'),
-    create: (data: { name: string; manager_id?: string }) => apiClient.post('/teams', data),
-    update: (id: string, data: Partial<{ name: string; manager_id: string; active: boolean }>) =>
+    create: (data: { name: string }) => apiClient.post('/teams', data),
+    update: (id: string, data: Partial<{ name: string; manager_id: string }>) =>
       apiClient.patch(`/teams/${id}`, data),
     remove: (id: string) => apiClient.delete(`/teams/${id}`),
   },
@@ -155,10 +155,11 @@ export const adminApi = {
   },
   users: {
     list: () => apiClient.get('/users'),
-    updateRoles: (
-      id: string,
-      data: Partial<{ is_admin: boolean; is_support_triage: boolean; is_executive: boolean; team_id: string | null }>,
-    ) => apiClient.patch(`/users/${id}/roles`, data),
+    updateRoles: (id: string, data: Partial<{ is_admin: boolean; is_support_triage: boolean; is_executive: boolean }>) =>
+      apiClient.patch(`/users/${id}/roles`, data),
+  },
+  ticketSite: {
+    correct: (ticketId: string, siteId: string) => apiClient.patch(`/tickets/${ticketId}/site`, { site_id: siteId }),
   },
 };
 
