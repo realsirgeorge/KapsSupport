@@ -2,105 +2,102 @@
 
 import { useEffect, useState } from 'react';
 import { dashboardApi } from '@/lib/api-client';
+import { useUser } from '@/components/app/user-context';
+import { StatCard } from '@/components/app/stat-card';
+import { Badge } from '@/components/ui/badge';
+import { WorkloadBar } from '@/components/app/workload-bar';
 
-interface SystemStats {
+interface SystemData {
   total_open: number;
-  by_team: Array<{ team: string; open: number; closed: number }>;
+  aging_over_3_days: number;
+  resolved_this_month: number;
+  avg_resolution_hours: number;
+  by_team: Array<{ team_id: string; team_name: string; count: number }>;
   by_status: Array<{ status: string; count: number }>;
-  pending_confirmations: Array<{ ticket_number: string; days_waiting: number }>;
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  new: 'New',
+  assigned: 'Assigned',
+  in_progress: 'In progress',
+  pending: 'Pending',
+  resolved: 'Resolved',
+  pending_confirmation: 'Pending confirmation',
+  reopened: 'Reopened',
+  closed: 'Closed (30d)',
+};
+
+const STATUS_DOT: Record<string, string> = {
+  new: 'bg-status-blue',
+  assigned: 'bg-status-blue',
+  in_progress: 'bg-status-amber',
+  pending: 'bg-status-amber',
+  resolved: 'bg-status-blue',
+  pending_confirmation: 'bg-status-blue',
+  reopened: 'bg-status-red',
+  closed: 'bg-status-green',
+};
+
 export default function SystemDashboardPage() {
-  const [stats, setStats] = useState<SystemStats | null>(null);
+  const user = useUser();
+  const [data, setData] = useState<SystemData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const response = await dashboardApi.system();
-        // Mock data - would come from API
-        setStats({
-          total_open: 87,
-          by_team: [
-            { team: 'Fintech', open: 34, closed: 128 },
-            { team: 'Technical', open: 28, closed: 105 },
-            { team: 'ICT', open: 25, closed: 92 },
-          ],
-          by_status: [
-            { status: 'new', count: 12 },
-            { status: 'assigned', count: 34 },
-            { status: 'in_progress', count: 28 },
-            { status: 'pending', count: 8 },
-            { status: 'pending_confirmation', count: 5 },
-          ],
-          pending_confirmations: [
-            { ticket_number: 'TCK-2026-00841', days_waiting: 5 },
-            { ticket_number: 'TCK-2026-00839', days_waiting: 3 },
-          ],
-        });
-      } catch (err) {
-        console.error('Failed to load system stats:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchStats();
+    dashboardApi
+      .system()
+      .then((res) => setData(res.data.data))
+      .finally(() => setIsLoading(false));
   }, []);
 
-  if (isLoading) return <div className="p-6">Loading system dashboard...</div>;
-  if (!stats) return <div className="p-6 text-red-400">Failed to load system stats</div>;
+  if (isLoading || !data) {
+    return <div className="text-muted-foreground">Loading...</div>;
+  }
+
+  const maxTeam = Math.max(1, ...data.by_team.map((t) => t.count));
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-white">System Dashboard</h2>
-
-      <div className="rounded-lg bg-gray-800 p-6">
-        <div className="text-sm text-gray-400">Total Open Tickets</div>
-        <div className="mt-2 text-4xl font-bold text-green-400">{stats.total_open}</div>
+      <div>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-foreground">System dashboard</h1>
+          {user.is_executive && <Badge variant="blue">Exec view · read-only</Badge>}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">All teams, all sites — full visibility{user.is_executive ? ', no editing for executive role' : ''}</p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-lg bg-gray-800 p-6">
-          <h3 className="text-lg font-bold text-white">By Team</h3>
-          <div className="mt-4 space-y-3">
-            {stats.by_team.map((team) => (
-              <div key={team.team} className="flex items-center justify-between text-sm">
-                <span className="text-gray-300">{team.team}</span>
-                <span className="font-semibold text-white">
-                  {team.open} open / {team.closed} closed
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="grid grid-cols-4 gap-4">
+        <StatCard label="Total open tickets" value={data.total_open} primary />
+        <StatCard label="Aging (>3 days)" value={data.aging_over_3_days} />
+        <StatCard label="Resolved this month" value={data.resolved_this_month} />
+        <StatCard label="Avg resolution time" value={`${data.avg_resolution_hours.toFixed(1)}h`} />
+      </div>
 
-        <div className="rounded-lg bg-gray-800 p-6">
-          <h3 className="text-lg font-bold text-white">By Status</h3>
-          <div className="mt-4 space-y-2">
-            {stats.by_status.map((item) => (
-              <div key={item.status} className="flex items-center justify-between text-sm">
-                <span className="text-gray-400 capitalize">{item.status.replace(/_/g, ' ')}</span>
-                <span className="font-semibold text-white">{item.count}</span>
-              </div>
-            ))}
-          </div>
+      <div>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tickets by team</p>
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
+          {data.by_team.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No open tickets.</p>
+          ) : (
+            data.by_team.map((t) => <WorkloadBar key={t.team_id} label={t.team_name} value={t.count} max={maxTeam} />)
+          )}
         </div>
       </div>
 
-      {stats.pending_confirmations.length > 0 && (
-        <div className="rounded-lg border border-orange-700 bg-orange-900 bg-opacity-20 p-6">
-          <h3 className="text-lg font-bold text-orange-300">⚠ Pending Confirmations (Long Wait)</h3>
-          <div className="mt-4 space-y-2">
-            {stats.pending_confirmations.map((item) => (
-              <div key={item.ticket_number} className="flex items-center justify-between">
-                <span className="font-mono text-orange-300">{item.ticket_number}</span>
-                <span className="text-sm text-orange-400">{item.days_waiting} days waiting</span>
+      <div>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tickets by status</p>
+        <div className="grid grid-cols-5 gap-4">
+          {data.by_status.map((s) => (
+            <div key={s.status} className="rounded-lg border border-border bg-card p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className={`h-2 w-2 rounded-full ${STATUS_DOT[s.status] ?? 'bg-status-gray'}`} />
+                {STATUS_LABELS[s.status] ?? s.status}
               </div>
-            ))}
-          </div>
+              <p className="mt-2 text-2xl font-bold text-foreground">{s.count}</p>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }

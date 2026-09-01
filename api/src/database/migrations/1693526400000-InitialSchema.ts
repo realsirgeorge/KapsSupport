@@ -223,7 +223,6 @@ export class InitialSchema1693526400000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.dropIndex('notifications', undefined);
     await queryRunner.dropTable('notifications');
 
     await queryRunner.dropIndex('availability_requests', 'availability_requests_user_idx');
@@ -252,10 +251,10 @@ export class InitialSchema1693526400000 implements MigrationInterface {
     await queryRunner.dropIndex('sites', 'sites_name_region_idx');
     await queryRunner.dropTable('sites');
 
-    await queryRunner.dropConstraint('teams', 'teams_manager_fk');
+    await queryRunner.query(`ALTER TABLE teams DROP CONSTRAINT IF EXISTS teams_manager_fk;`);
     await queryRunner.dropTable('teams');
 
-    await queryRunner.dropConstraint('users', 'users_team_fk');
+    await queryRunner.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_team_fk;`);
     await queryRunner.dropIndex('users', 'users_sso_identity');
     await queryRunner.dropTable('users');
 

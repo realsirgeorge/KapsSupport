@@ -26,8 +26,8 @@ export class TicketsController {
   async listTickets(
     @Request() req,
     @Query('status') status?: string,
-    @Query('mine') mine?: boolean,
-    @Query('assigned_to_me') assigned_to_me?: boolean,
+    @Query('mine') mine?: string | boolean,
+    @Query('assigned_to_me') assigned_to_me?: string | boolean,
     @Query('team_id') team_id?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
@@ -119,40 +119,6 @@ export class TicketsController {
     }
 
     const ticket = await this.ticketService.confirmResolution(id, body.action, req.user, body.comment);
-    return { data: ticket };
-  }
-
-  /**
-   * POST /v1/tickets/:id/category/confirm - Confirm category
-   */
-  @Post(':id/category/confirm')
-  async confirmCategory(
-    @Param('id') id: string,
-    @Body() body: { category_id: string },
-    @Request() req,
-  ) {
-    if (!body.category_id) {
-      throw new BadRequestException('Category ID is required');
-    }
-
-    const result = await this.ticketService.confirmCategory(id, body.category_id, req.user);
-    return { data: result.ticket, meta: { reassignment_required: result.reassignment_required } };
-  }
-
-  /**
-   * POST /v1/tickets/:id/assign - Assign ticket to team member
-   */
-  @Post(':id/assign')
-  async assign(
-    @Param('id') id: string,
-    @Body() body: { assignee_id: string },
-    @Request() req,
-  ) {
-    if (!body.assignee_id) {
-      throw new BadRequestException('Assignee ID is required');
-    }
-
-    const ticket = await this.ticketService.assign(id, body.assignee_id, req.user);
     return { data: ticket };
   }
 }

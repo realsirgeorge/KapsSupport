@@ -1,81 +1,184 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ticketApi, Ticket } from '@/lib/api-client';
-import Link from 'next/link';
+import { useSearch } from '@/components/app/search-context';
+import { StatCard } from '@/components/app/stat-card';
+import { StatusBadge } from '@/components/app/status-badge';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 
-export default function AssignedPage() {
+const OPEN_STATUSES = new Set(['new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened']);
+
+export default function AssignedToMePage() {
+  const { query } = useSearch();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingModal, setPendingModal] = useState<Ticket | null>(null);
+  const [pendingReason, setPendingReason] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = () => ticketApi.list({ assigned_to_me: true, limit: 100 }).then((res) => setTickets(res.data.data || []));
 
   useEffect(() => {
-    const fetchAssigned = async () => {
-      try {
-        const response = await ticketApi.list({ assigned_to_me: true });
-        setTickets(response.data.data || []);
-      } catch (err) {
-        console.error('Failed to load assigned tickets:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchAssigned();
+    load().finally(() => setIsLoading(false));
   }, []);
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      assigned: 'text-blue-400',
-      in_progress: 'text-cyan-400',
-      pending: 'text-orange-400',
-      resolved: 'text-purple-400',
-      pending_confirmation: 'text-indigo-400',
-    };
-    return colors[status] || 'text-gray-400';
+  const updateStatus = async (ticket: Ticket, status: string, reason?: string) => {
+    setBusyId(ticket.id);
+    try {
+      await ticketApi.updateStatus(ticket.id, status, reason);
+      toast.success(`${ticket.ticket_number} updated`);
+      await load();
+    } catch {
+      toast.error('Could not update status');
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  if (isLoading) return <div className="p-6">Loading...</div>;
+  const submitPending = async () => {
+    if (!pendingModal || !pendingReason.trim()) return;
+    await updateStatus(pendingModal, 'pending', pendingReason.trim());
+    setPendingModal(null);
+    setPendingReason('');
+  };
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return tickets;
+    const q = query.toLowerCase();
+    return tickets.filter((t) => t.ticket_number.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q));
+  }, [tickets, query]);
+
+  const counters = useMemo(() => {
+    const now = new Date();
+    let assignedOpen = 0;
+    let pendingBlocked = 0;
+    let resolvedThisWeek = 0;
+    const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    for (const t of tickets) {
+      if (OPEN_STATUSES.has(t.status)) assignedOpen++;
+      if (t.status === 'pending') pendingBlocked++;
+      if (t.resolved_at && new Date(t.resolved_at).getTime() >= weekAgo) resolvedThisWeek++;
+    }
+    return { assignedOpen, pendingBlocked, resolvedThisWeek };
+  }, [tickets]);
+
+  if (isLoading) {
+    return <div className="text-muted-foreground">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white">Assigned to Me</h2>
-        <p className="mt-2 text-gray-400">Tickets you're currently working on</p>
+        <h1 className="text-2xl font-bold text-foreground">Assigned to me</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Update status as you work through your tickets</p>
       </div>
 
-      {tickets.length === 0 ? (
-        <div className="rounded-lg bg-gray-800 p-6 text-center text-gray-400">
-          No tickets assigned to you
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {tickets.map((ticket) => (
-            <Link
-              key={ticket.id}
-              href={`/dashboard/tickets/${ticket.id}`}
-              className="rounded-lg border border-gray-700 bg-gray-800 p-4 hover:border-green-600"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-green-400">{ticket.ticket_number}</span>
-                    <span className={`text-sm font-semibold ${getStatusColor(ticket.status)}`}>
-                      {ticket.status.replace(/_/g, ' ').toUpperCase()}
-                    </span>
+      <div className="grid grid-cols-3 gap-4">
+        <StatCard label="Assigned to me" value={counters.assignedOpen} primary />
+        <StatCard label="Pending (blocked)" value={counters.pendingBlocked} />
+        <StatCard label="Resolved this week" value={counters.resolvedThisWeek} />
+      </div>
+
+      <div>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">My assigned tickets</p>
+        {filtered.length === 0 ? (
+          <div className="rounded-lg border border-border bg-card p-10 text-center text-muted-foreground">
+            {tickets.length === 0 ? 'Nothing assigned to you right now.' : 'No tickets match your search.'}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((ticket) => {
+              const busy = busyId === ticket.id;
+              return (
+                <div key={ticket.id} className="rounded-lg border border-border bg-card p-5">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{ticket.ticket_number}</span>
+                        {ticket.category_name && <Badge variant="outline">{ticket.category_name}</Badge>}
+                      </div>
+                      <h3 className="mt-1 text-base font-semibold text-foreground">{ticket.subject}</h3>
+                      <p className="mt-0.5 text-sm text-muted-foreground">{ticket.site_name ?? ''}</p>
+                    </div>
+                    <StatusBadge status={ticket.status} pendingReason={ticket.pending_reason} createdAt={ticket.created_at} />
                   </div>
-                  <h3 className="mt-2 text-lg font-semibold text-white">{ticket.subject}</h3>
-                  {ticket.pending_reason && (
-                    <p className="mt-1 text-sm text-orange-400">⏸ {ticket.pending_reason}</p>
-                  )}
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {ticket.status === 'assigned' && (
+                      <Button size="sm" disabled={busy} onClick={() => updateStatus(ticket, 'in_progress')}>
+                        Start progress
+                      </Button>
+                    )}
+                    {ticket.status === 'pending' && (
+                      <Button size="sm" disabled={busy} onClick={() => updateStatus(ticket, 'in_progress')}>
+                        Resume progress
+                      </Button>
+                    )}
+                    {ticket.status === 'in_progress' && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => {
+                            setPendingModal(ticket);
+                            setPendingReason('');
+                          }}
+                        >
+                          Mark pending
+                        </Button>
+                        <Button size="sm" disabled={busy} onClick={() => updateStatus(ticket, 'resolved')}>
+                          Mark resolved
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <button className="rounded-md bg-green-600 px-3 py-1 text-sm font-semibold text-white hover:bg-green-700">
-                  Update Status
-                </button>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <Dialog open={!!pendingModal} onOpenChange={(open) => !open && setPendingModal(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark {pendingModal?.ticket_number} as pending</DialogTitle>
+            <DialogDescription>Let the requester know what you&apos;re waiting on.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="pending-reason">Reason</Label>
+            <Textarea
+              id="pending-reason"
+              value={pendingReason}
+              onChange={(e) => setPendingReason(e.target.value)}
+              placeholder="e.g. awaiting vendor, waiting on part delivery"
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingModal(null)}>
+              Cancel
+            </Button>
+            <Button onClick={submitPending} disabled={!pendingReason.trim()}>
+              Mark pending
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

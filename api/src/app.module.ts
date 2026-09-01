@@ -7,6 +7,11 @@ import { AuthModule } from './modules/auth/auth.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { UsersModule } from './modules/users/users.module';
+import { AvailabilityModule } from './modules/availability/availability.module';
+import { ManagerModule } from './modules/manager/manager.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { TriageModule } from './modules/triage/triage.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -24,6 +29,11 @@ import { UsersModule } from './modules/users/users.module';
     TicketsModule,
     TeamsModule,
     UsersModule,
+    AvailabilityModule,
+    ManagerModule,
+    DashboardModule,
+    TriageModule,
+    AdminModule,
   ],
   controllers: [],
   providers: [],

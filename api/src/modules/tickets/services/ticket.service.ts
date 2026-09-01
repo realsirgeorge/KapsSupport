@@ -1,10 +1,9 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { TicketStateMachine, TicketStatus } from '../states/ticket-state-machine';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
-// Temporary: inline entity interfaces (entities would be separate files)
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string;
@@ -15,7 +14,7 @@ interface User {
   is_unavailable: boolean;
 }
 
-interface Ticket {
+export interface Ticket {
   id: string;
   ticket_number: string;
   requester_id: string;
@@ -41,45 +40,36 @@ interface Ticket {
 @Injectable()
 export class TicketService {
   private stateMachine: TicketStateMachine;
-  private ticketsRepository: Repository<Ticket>;
 
   constructor(
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
   ) {
     this.stateMachine = new TicketStateMachine();
-    this.ticketsRepository = this.dataSource.getRepository('tickets');
   }
 
   /**
    * Shared authorization module: scope tickets by user's role and team/site.
-   * Returns a filtered query builder that enforces what this user can see.
+   * Returns SQL WHERE conditions (ANDed) and their params, starting at $1.
    */
-  private scopeTicketsForUser(user: User): SelectQueryBuilder<Ticket> {
-    let query = this.ticketsRepository.createQueryBuilder('ticket');
-
-    if (user.is_admin || user.is_executive) {
-      // Admin and Executive see all tickets
-      return query;
-    }
-
-    if (user.is_support_triage) {
-      // Support/Triage sees all tickets
-      return query;
+  private scopeTicketsForUser(user: User): { conditions: string[]; params: any[] } {
+    if (user.is_admin || user.is_executive || user.is_support_triage) {
+      // Admin, Executive, and Support/Triage see all tickets
+      return { conditions: [], params: [] };
     }
 
     if (user.team_id) {
       // Team Member / Manager: see own created + own team's + own assigned
-      query = query.where('ticket.requester_id = :userId', { userId: user.id })
-        .orWhere('ticket.assigned_to = :userId', { userId: user.id });
-
-      // If Manager, also see team's tickets
-      // (would check if user.manages_team_id exists)
-      return query;
+      return {
+        conditions: [
+          `(ticket.requester_id = $1 OR ticket.assigned_to = $1 OR ticket.confirmed_category_id IN (SELECT id FROM categories WHERE team_id = $2))`,
+        ],
+        params: [user.id, user.team_id],
+      };
     }
 
     // Requester (no team): see only own tickets
-    return query.where('ticket.requester_id = :userId', { userId: user.id });
+    return { conditions: ['ticket.requester_id = $1'], params: [user.id] };
   }
 
   /**
@@ -96,36 +86,55 @@ export class TicketService {
       limit?: number;
     } = {},
   ): Promise<{ data: Ticket[]; total: number; page: number; limit: number }> {
-    let query = this.scopeTicketsForUser(user);
+    const scope = this.scopeTicketsForUser(user);
+    const conditions = [...scope.conditions];
+    const params = [...scope.params];
 
-    // Apply filters
     if (options.mine) {
-      query = query.andWhere('ticket.requester_id = :userId', { userId: user.id });
+      params.push(user.id);
+      conditions.push(`ticket.requester_id = $${params.length}`);
     }
 
     if (options.assigned_to_me) {
-      query = query.andWhere('ticket.assigned_to = :userId', { userId: user.id });
+      params.push(user.id);
+      conditions.push(`ticket.assigned_to = $${params.length}`);
     }
 
     if (options.status) {
-      query = query.andWhere('ticket.status = :status', { status: options.status });
+      params.push(options.status);
+      conditions.push(`ticket.status = $${params.length}`);
     }
 
     if (options.team_id && (user.is_admin || user.is_support_triage)) {
-      // Only Admin/Support can filter by team
-      query = query.andWhere('category.team_id = :teamId', { teamId: options.team_id });
+      params.push(options.team_id);
+      conditions.push(
+        `ticket.confirmed_category_id IN (SELECT id FROM categories WHERE team_id = $${params.length})`,
+      );
     }
 
-    // Pagination
-    const page = options.page || 1;
-    const limit = Math.min(options.limit || 25, 100); // Max 100
-    const skip = (page - 1) * limit;
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const [data, total] = await query
-      .skip(skip)
-      .take(limit)
-      .orderBy('ticket.created_at', 'DESC')
-      .getManyAndCount();
+    const page = options.page || 1;
+    const limit = Math.min(options.limit || 25, 100);
+    const offset = (page - 1) * limit;
+
+    const countResult = await this.dataSource.query(
+      `SELECT COUNT(*) as count FROM tickets ticket ${whereClause}`,
+      params,
+    );
+    const total = parseInt(countResult[0].count || '0', 10);
+
+    const data = await this.dataSource.query(
+      `SELECT ticket.*, c.name as category_name, s.name as site_name, au.name as assignee_name
+       FROM tickets ticket
+       LEFT JOIN categories c ON ticket.confirmed_category_id = c.id
+       LEFT JOIN sites s ON ticket.site_id = s.id
+       LEFT JOIN users au ON ticket.assigned_to = au.id
+       ${whereClause}
+       ORDER BY ticket.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset],
+    );
 
     return { data, total, page, limit };
   }
@@ -134,8 +143,21 @@ export class TicketService {
    * Get a single ticket (with authorization check).
    */
   async getTicket(ticketId: string, user: User): Promise<Ticket> {
-    const query = this.scopeTicketsForUser(user);
-    const ticket = await query.andWhere('ticket.id = :ticketId', { ticketId }).getOne();
+    const scope = this.scopeTicketsForUser(user);
+    const params = [...scope.params, ticketId];
+    const conditions = [...scope.conditions, `ticket.id = $${params.length}`];
+
+    const [ticket] = await this.dataSource.query(
+      `SELECT ticket.*, c.name as category_name, s.name as site_name,
+              au.name as assignee_name, ru.name as requester_name
+       FROM tickets ticket
+       LEFT JOIN categories c ON ticket.confirmed_category_id = c.id
+       LEFT JOIN sites s ON ticket.site_id = s.id
+       LEFT JOIN users au ON ticket.assigned_to = au.id
+       LEFT JOIN users ru ON ticket.requester_id = ru.id
+       WHERE ${conditions.join(' AND ')}`,
+      params,
+    );
 
     if (!ticket) {
       throw new NotFoundException('Ticket not found or access denied');
@@ -167,29 +189,34 @@ export class TicketService {
   ): Promise<Ticket> {
     // Generate ticket number (e.g., TCK-2026-00001)
     const year = new Date().getFullYear();
-    const lastTicket = await this.ticketsRepository
-      .createQueryBuilder('ticket')
-      .orderBy('ticket.created_at', 'DESC')
-      .limit(1)
-      .getOne();
+    const [lastTicket] = await this.dataSource.query(
+      `SELECT ticket_number FROM tickets WHERE ticket_number LIKE $1 ORDER BY created_at DESC LIMIT 1`,
+      [`TCK-${year}-%`],
+    );
 
     const lastNumber = lastTicket && lastTicket.ticket_number
       ? parseInt(lastTicket.ticket_number.split('-')[2])
       : 0;
     const ticket_number = `TCK-${year}-${String(lastNumber + 1).padStart(5, '0')}`;
 
-    const ticket = this.ticketsRepository.create({
-      ...data,
-      ticket_number,
-      requester_id: requesterId,
-      status: TicketStatus.NEW,
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
+    const [ticket] = await this.dataSource.query(
+      `INSERT INTO tickets
+        (ticket_number, requester_id, site_id, suggested_category_id, suggested_priority,
+         subject, description, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+       RETURNING *`,
+      [
+        ticket_number,
+        requesterId,
+        data.site_id,
+        data.suggested_category_id || null,
+        data.suggested_priority || null,
+        data.subject,
+        data.description,
+        TicketStatus.NEW,
+      ],
+    );
 
-    await this.ticketsRepository.save(ticket);
-
-    // Emit event for audit logging
     this.eventEmitter.emit('ticket.created', { ticket, actor_id: requesterId });
 
     return ticket;
@@ -222,33 +249,38 @@ export class TicketService {
       throw new BadRequestException('Pending reason is required');
     }
 
-    // Update ticket
-    ticket.status = newStatus;
-    if (newStatus === TicketStatus.PENDING) {
-      ticket.pending_reason = pending_reason;
-    } else {
-      ticket.pending_reason = null;
-    }
+    let finalStatus = newStatus;
+    let resolvedAtClause = '';
+    let pendingConfirmationAtClause = '';
 
     if (newStatus === TicketStatus.RESOLVED) {
       // Team Member marks resolved → actually transitions to pending_confirmation
-      ticket.status = TicketStatus.PENDING_CONFIRMATION;
-      ticket.resolved_at = new Date();
-      ticket.pending_confirmation_at = new Date();
+      finalStatus = TicketStatus.PENDING_CONFIRMATION;
+      resolvedAtClause = ', resolved_at = now()';
+      pendingConfirmationAtClause = ', pending_confirmation_at = now()';
     }
 
-    ticket.updated_at = new Date();
-    await this.ticketsRepository.save(ticket);
+    const [updatedTicket] = await this.dataSource.query(
+      `UPDATE tickets
+       SET status = $1,
+           pending_reason = $2,
+           updated_at = now()
+           ${resolvedAtClause}
+           ${pendingConfirmationAtClause}
+       WHERE id = $3
+       RETURNING *`,
+      [finalStatus, newStatus === TicketStatus.PENDING ? pending_reason : null, ticketId],
+    );
 
     // Emit event for audit logging and notifications
     this.eventEmitter.emit('ticket.status_changed', {
-      ticket,
+      ticket: updatedTicket,
       old_status: ticket.status,
-      new_status: newStatus,
+      new_status: finalStatus,
       actor_id: user.id,
     });
 
-    return ticket;
+    return updatedTicket;
   }
 
   /**
@@ -271,97 +303,29 @@ export class TicketService {
       throw new BadRequestException('Ticket is not pending confirmation');
     }
 
-    if (action === 'confirm') {
-      ticket.status = TicketStatus.CLOSED;
-      ticket.closed_at = new Date();
+    let updatedTicket: Ticket;
 
-      this.eventEmitter.emit('ticket.confirmed', { ticket, actor_id: requester.id });
-    } else if (action === 'dispute') {
-      // Reopen and return to same Team Member
-      ticket.status = TicketStatus.REOPENED;
-      // assigned_to stays the same (returns to same Team Member, not Support/Triage)
+    if (action === 'confirm') {
+      [updatedTicket] = await this.dataSource.query(
+        `UPDATE tickets SET status = $1, closed_at = now(), updated_at = now() WHERE id = $2 RETURNING *`,
+        [TicketStatus.CLOSED, ticketId],
+      );
+
+      this.eventEmitter.emit('ticket.confirmed', { ticket: updatedTicket, actor_id: requester.id });
+    } else {
+      // Reopen and return to same Team Member (assigned_to stays the same)
+      [updatedTicket] = await this.dataSource.query(
+        `UPDATE tickets SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+        [TicketStatus.REOPENED, ticketId],
+      );
 
       this.eventEmitter.emit('ticket.disputed', {
-        ticket,
+        ticket: updatedTicket,
         actor_id: requester.id,
         dispute_reason: comment,
       });
     }
 
-    ticket.updated_at = new Date();
-    await this.ticketsRepository.save(ticket);
-
-    return ticket;
-  }
-
-  /**
-   * Confirm category (Support/Triage only).
-   */
-  async confirmCategory(
-    ticketId: string,
-    categoryId: string,
-    user: User,
-  ): Promise<{ ticket: Ticket; reassignment_required: boolean }> {
-    if (!user.is_support_triage && !user.is_admin) {
-      throw new ForbiddenException('Only Support/Triage can confirm category');
-    }
-
-    const ticket = await this.getTicket(ticketId, user);
-
-    ticket.confirmed_category_id = categoryId;
-    ticket.updated_at = new Date();
-    await this.ticketsRepository.save(ticket);
-
-    // Check if current assignee is in the new category's team
-    let reassignment_required = false;
-    if (ticket.assigned_to) {
-      // Would query to verify assignee.team matches category.team
-      // For now, assume it's validated by DB trigger
-      reassignment_required = false;
-    }
-
-    this.eventEmitter.emit('ticket.category_confirmed', {
-      ticket,
-      category_id: categoryId,
-      actor_id: user.id,
-    });
-
-    return { ticket, reassignment_required };
-  }
-
-  /**
-   * Assign ticket (Support/Triage or Manager).
-   */
-  async assign(
-    ticketId: string,
-    assignee_id: string,
-    user: User,
-  ): Promise<Ticket> {
-    if (!user.is_support_triage && !user.is_admin && !user.team_id) {
-      throw new ForbiddenException('Not authorized to assign');
-    }
-
-    const ticket = await this.getTicket(ticketId, user);
-
-    // Validate assignee isn't unavailable
-    // Would query user table here
-    // const assignee = await this.usersRepository.findOne(assignee_id);
-    // if (assignee.is_unavailable) throw new BadRequestException('Assignee is unavailable');
-
-    ticket.assigned_to = assignee_id;
-    ticket.assigned_by = user.id;
-    ticket.assigned_at = new Date();
-    ticket.status = TicketStatus.ASSIGNED;
-    ticket.updated_at = new Date();
-
-    await this.ticketsRepository.save(ticket);
-
-    this.eventEmitter.emit('ticket.assigned', {
-      ticket,
-      assignee_id,
-      actor_id: user.id,
-    });
-
-    return ticket;
+    return updatedTicket;
   }
 }

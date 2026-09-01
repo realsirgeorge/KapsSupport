@@ -1,6 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
-import { User } from './user.entity';
-import { Category } from './category.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('teams')
 export class Team {
@@ -21,13 +19,4 @@ export class Team {
 
   @UpdateDateColumn()
   updated_at: Date;
-
-  @ManyToOne(() => User, { nullable: true })
-  manager: User;
-
-  @OneToMany(() => User, (user) => user.team)
-  members: User[];
-
-  @OneToMany(() => Category, (category) => category.team)
-  categories: Category[];
 }
