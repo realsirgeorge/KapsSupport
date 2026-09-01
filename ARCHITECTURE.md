@@ -80,6 +80,8 @@ A user can technically satisfy more than one condition (e.g. the seeded Manager 
 | `dashboard` | `GET /v1/me/counters`, `GET /v1/dashboard/system`, `GET /v1/dashboard/system/pending-confirmations` | Role-shaped counter widgets (each role gets a different response shape from the same `/me/counters` endpoint) and the system-wide admin/exec view |
 | `admin` | `GET/POST/PATCH/DELETE /v1/teams`, `GET/POST/PATCH /v1/sites`, `GET/POST/PATCH /v1/categories`, `GET/PATCH /v1/users`, `PATCH /v1/tickets/:id/site` | Teams/sites/categories/users CRUD, ticket site correction |
 | `availability` | `GET/POST /v1/availability-requests`, `POST /v1/availability-requests/:id/{approve,reject,end}` | Leave/unavailability request → manager approval → `users.is_unavailable` flip |
+| `attachments` | `GET/POST /v1/tickets/:id/attachments`, `POST .../attachments/:id/confirm`, `GET /v1/attachments/:id/download` | Presigned-URL upload/download against MinIO, async validation via Bull |
+| `comments` | `GET/POST /v1/tickets/:id/comments` | Requester replies + staff internal notes, filtered per viewer |
 | `teams`, `users` | *(none)* | Empty placeholder modules registered in `app.module.ts` from initial scaffolding. No controllers or services. Real team/user functionality lives in `manager` and `admin`. Candidates for deletion. |
 
 `GET /v1/sites` and `GET /v1/categories` (list-only) have no role restriction — every authenticated user can read them, needed for the New Ticket form's site/category pickers.
@@ -129,10 +131,14 @@ Notable constraints/triggers (`1693526400001-AddTriggersAndConstraints.ts`):
 
 `users.email` uses the `citext` extension (case-insensitive). `is_unavailable` on `users` is written by exactly two code paths: `AvailabilityService.approveRequest()` (sets `true`) and `AvailabilityService.endRequest()` for toggle-type requests (sets `false`) — nothing else may write it.
 
+## File storage and comments
+
+**Attachments**: MinIO runs on knight-labs (`support-minio`, Tailscale-only, bucket `ticket-attachments`). The `attachments` module implements the 3-step flow: `POST /v1/tickets/:id/attachments/request-upload` returns a presigned PUT URL, the client uploads directly to MinIO (the file body never passes through the API), then `POST /v1/tickets/:id/attachments/:attachmentId/confirm` enqueues a Bull job on the `attachment-validation` queue — the same queue the worker's stub handler was already listening on from the original scaffold, just never fed until this was wired up. Validation currently always marks `safe` (real content-type sniffing is a documented future improvement in the worker's own code, not a gap introduced here). 25MB size cap, allowlist of image/PDF/text/CSV content types, enforced both client- and server-side.
+
+**Comments**: `comments` module implements FR-1.4 (requester replies) and FR-4.4 (Team Member/staff internal notes). `is_internal` can only be set by staff (`is_admin`, `is_support_triage`, or has a `team_id`) — a pure Requester's attempt to set it is silently ignored server-side, not just hidden client-side. `GET` filters out internal comments entirely for non-staff viewers.
+
 ## Known gaps
 
-- **Attachments**: `ticket_attachments` table exists; no upload endpoints exist anywhere in the API, and no MinIO instance is provisioned. The New Ticket form renders a visibly-disabled dropzone rather than a half-working upload.
-- **Comments**: `ticket_comments` table exists; no comment endpoints exist. "Add note" is omitted from the UI rather than shipped as dead functionality.
 - **Search**: `tickets.search_vector` (tsvector) exists and is populated; nothing queries it. The visible search box is client-side substring filtering only.
-- **Admin CRUD UI**: the API for Teams/Sites/Categories/Users management is complete; no frontend pages existed as of the first UI pass (nav links were omitted rather than pointed at 404s). Status of this gap should be checked against the current state of `web/app/dashboard/admin/` before assuming it's still open.
 - **`teams`/`users` NestJS modules**: empty scaffolding, superseded by `manager`/`admin`. Not wired to anything; safe to delete once confirmed unused.
+- **JWT staleness**: role/availability fields in the JWT (`is_unavailable`, role booleans, `manages_team_id`) are a snapshot from login time. If another user's action changes them mid-session (e.g. a manager approves your leave while you're logged in), your own UI won't reflect it until you log out and back in. Not fixed in this pass — would need either short-lived tokens with refresh, or a live `/me` re-fetch on relevant actions.

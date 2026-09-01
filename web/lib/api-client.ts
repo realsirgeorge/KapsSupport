@@ -77,6 +77,16 @@ export interface ListTicketsParams {
   limit?: number;
 }
 
+export interface Comment {
+  id: string;
+  ticket_id: string;
+  author_id: string;
+  author_name?: string;
+  body: string;
+  is_internal: boolean;
+  created_at: string;
+}
+
 export interface Attachment {
   id: string;
   ticket_id: string;
@@ -172,6 +182,13 @@ export const adminApi = {
   ticketSite: {
     correct: (ticketId: string, siteId: string) => apiClient.patch(`/tickets/${ticketId}/site`, { site_id: siteId }),
   },
+};
+
+// Comment endpoints
+export const commentsApi = {
+  list: (ticketId: string) => apiClient.get(`/tickets/${ticketId}/comments`),
+  add: (ticketId: string, body: string, isInternal?: boolean) =>
+    apiClient.post(`/tickets/${ticketId}/comments`, { body, is_internal: isInternal }),
 };
 
 // Availability endpoints

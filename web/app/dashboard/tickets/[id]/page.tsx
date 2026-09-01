@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Paperclip, Download } from 'lucide-react';
-import { ticketApi, attachmentsApi, uploadAttachment, Ticket, Attachment } from '@/lib/api-client';
+import { ticketApi, attachmentsApi, commentsApi, uploadAttachment, Ticket, Attachment, Comment } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { relativeTime } from '@/lib/format';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ export default function TicketDetailPage() {
   const user = useUser();
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,15 +36,23 @@ export default function TicketDetailPage() {
   const [pendingReason, setPendingReason] = useState('');
   const [disputeModalOpen, setDisputeModalOpen] = useState(false);
   const [disputeComment, setDisputeComment] = useState('');
+  const [newComment, setNewComment] = useState('');
+  const [newCommentInternal, setNewCommentInternal] = useState(false);
+  const [postingComment, setPostingComment] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isStaff = user.is_admin || user.is_support_triage || !!user.team_id;
 
   const loadAttachments = () =>
     attachmentsApi.list(params.id).then((res) => setAttachments(res.data.data || []));
+
+  const loadComments = () => commentsApi.list(params.id).then((res) => setComments(res.data.data || []));
 
   const load = () =>
     ticketApi
       .get(params.id)
       .then((res) => setTicket(res.data.data))
+      .then(() => loadComments())
       .then(() => loadAttachments())
       .catch(() => setError('Ticket not found or you do not have access to it.'));
 
@@ -77,6 +87,21 @@ export default function TicketDetailPage() {
       window.open(res.data.data.url, '_blank');
     } catch {
       toast.error('Could not get a download link');
+    }
+  };
+
+  const postComment = async () => {
+    if (!newComment.trim()) return;
+    setPostingComment(true);
+    try {
+      await commentsApi.add(params.id, newComment.trim(), newCommentInternal);
+      setNewComment('');
+      setNewCommentInternal(false);
+      await loadComments();
+    } catch {
+      toast.error('Could not post comment');
+    } finally {
+      setPostingComment(false);
     }
   };
 
@@ -245,6 +270,57 @@ export default function TicketDetailPage() {
             ))}
           </ul>
         )}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <h2 className="text-sm font-semibold text-foreground">Comments</h2>
+
+        {comments.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">No comments yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {comments.map((c) => (
+              <li
+                key={c.id}
+                className={c.is_internal ? 'rounded-md border border-status-amber/30 bg-status-amber/5 p-3' : 'rounded-md bg-secondary p-3'}
+              >
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{c.author_name ?? 'Someone'}</span>
+                  {c.is_internal && <Badge variant="amber">Internal note</Badge>}
+                  <span>· {relativeTime(c.created_at)}</span>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{c.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-4 space-y-2 border-t border-border pt-4">
+          <Textarea
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            placeholder={isRequester ? 'Add a reply...' : 'Add a comment...'}
+            rows={2}
+          />
+          <div className="flex items-center justify-between">
+            {isStaff ? (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={newCommentInternal}
+                  onChange={(e) => setNewCommentInternal(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border accent-[hsl(var(--primary))]"
+                />
+                Internal note (requester won&apos;t see this)
+              </label>
+            ) : (
+              <span />
+            )}
+            <Button size="sm" disabled={postingComment || !newComment.trim()} onClick={postComment}>
+              Post
+            </Button>
+          </div>
+        </div>
       </div>
 
       <Dialog open={pendingModalOpen} onOpenChange={setPendingModalOpen}>

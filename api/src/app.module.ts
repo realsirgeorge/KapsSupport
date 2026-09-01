@@ -13,6 +13,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TriageModule } from './modules/triage/triage.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
+import { CommentsModule } from './modules/comments/comments.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { AttachmentsModule } from './modules/attachments/attachments.module';
     TriageModule,
     AdminModule,
     AttachmentsModule,
+    CommentsModule,
   ],
   controllers: [],
   providers: [],

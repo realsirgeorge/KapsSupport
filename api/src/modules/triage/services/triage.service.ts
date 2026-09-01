@@ -25,6 +25,12 @@ export class TriageService {
     private eventEmitter: EventEmitter2,
   ) {}
 
+  /** team_id means team membership, not management — see with-actor.ts / manager.service.ts for the same fix elsewhere. */
+  private async getManagesTeamId(userId: string): Promise<string | null> {
+    const [team] = await this.dataSource.query('SELECT id FROM teams WHERE manager_id = $1 LIMIT 1', [userId]);
+    return team ? team.id : null;
+  }
+
   /**
    * GET /triage/queue - List tickets needing triage
    * Tickets with status = 'new' OR confirmed_category_id IS NULL OR assigned_to IS NULL
@@ -148,7 +154,8 @@ export class TriageService {
 
     // Check authorization
     const isSupport = user.is_support_triage || user.is_admin;
-    const isManager = user.team_id && ticket.team_id === user.team_id;
+    const managesTeamId = isSupport ? null : await this.getManagesTeamId(user.id);
+    const isManager = !!managesTeamId && managesTeamId === ticket.team_id;
 
     if (!isSupport && !isManager) {
       throw new ForbiddenException(
@@ -199,7 +206,8 @@ export class TriageService {
 
     // Check authorization
     const isSupport = user.is_support_triage || user.is_admin;
-    const isManager = user.team_id && ticket.team_id === user.team_id;
+    const managesTeamId = isSupport ? null : await this.getManagesTeamId(user.id);
+    const isManager = !!managesTeamId && managesTeamId === ticket.team_id;
 
     if (!isSupport && !isManager) {
       throw new ForbiddenException(
