@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ticketApi, sitesApi, categoriesApi, Site, Category } from '@/lib/api-client';
+import { X, Paperclip } from 'lucide-react';
+import { ticketApi, sitesApi, categoriesApi, uploadAttachment, Site, Category } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,17 +12,29 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
+const MAX_SIZE_BYTES = 25 * 1024 * 1024;
+const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/csv']);
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
 export default function CreateTicketPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [dragOver, setDragOver] = useState(false);
 
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [siteId, setSiteId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
 
   useEffect(() => {
     Promise.all([sitesApi.list(), categoriesApi.list()]).then(([sitesRes, catsRes]) => {
@@ -30,11 +43,35 @@ export default function CreateTicketPage() {
     });
   }, []);
 
+  const addFiles = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const rejected: string[] = [];
+    const accepted: File[] = [];
+    Array.from(incoming).forEach((f) => {
+      if (f.size > MAX_SIZE_BYTES) {
+        rejected.push(`${f.name} (over 25MB)`);
+      } else if (!ALLOWED_TYPES.has(f.type)) {
+        rejected.push(`${f.name} (unsupported file type)`);
+      } else {
+        accepted.push(f);
+      }
+    });
+    if (rejected.length) {
+      toast.error(`Skipped: ${rejected.join(', ')}`);
+    }
+    setFiles((prev) => [...prev, ...accepted]);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
+    let ticketId: string;
     try {
       const res = await ticketApi.create({
         subject,
@@ -42,13 +79,32 @@ export default function CreateTicketPage() {
         site_id: siteId,
         suggested_category_id: categoryId || undefined,
       });
-      toast.success('Ticket submitted');
-      router.push(`/dashboard/tickets/${res.data.data.id}`);
+      ticketId = res.data.data.id;
     } catch (err) {
       setError('Failed to create ticket. Check that all required fields are filled in.');
-    } finally {
       setIsLoading(false);
+      return;
     }
+
+    if (files.length > 0) {
+      const failures: string[] = [];
+      for (const file of files) {
+        try {
+          await uploadAttachment(ticketId, file);
+        } catch {
+          failures.push(file.name);
+        }
+      }
+      if (failures.length) {
+        toast.error(`Ticket created, but these files didn't upload: ${failures.join(', ')}. You can retry from the ticket page.`);
+      } else {
+        toast.success('Ticket submitted with attachments');
+      }
+    } else {
+      toast.success('Ticket submitted');
+    }
+
+    router.push(`/dashboard/tickets/${ticketId}`);
   };
 
   return (
@@ -126,9 +182,55 @@ export default function CreateTicketPage() {
 
           <div className="space-y-1.5">
             <Label>Attachments (optional)</Label>
-            <div className="flex h-24 cursor-not-allowed items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-              File uploads aren&apos;t available yet
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                addFiles(e.dataTransfer.files);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                'flex h-24 cursor-pointer items-center justify-center rounded-md border border-dashed text-sm transition-colors',
+                dragOver ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:bg-accent',
+              )}
+            >
+              Drag files here or click to upload (max 25MB — images, PDF, text, CSV)
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => addFiles(e.target.files)}
+            />
+            {files.length > 0 && (
+              <ul className="space-y-1">
+                {files.map((f, i) => (
+                  <li
+                    key={`${f.name}-${i}`}
+                    className="flex items-center justify-between rounded-md bg-secondary px-3 py-1.5 text-sm"
+                  >
+                    <span className="flex items-center gap-2 text-foreground">
+                      <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
+                      {f.name} <span className="text-muted-foreground">({formatSize(f.size)})</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {error && (

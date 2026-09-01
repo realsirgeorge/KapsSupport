@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ticketApi, Ticket } from '@/lib/api-client';
+import { Paperclip, Download } from 'lucide-react';
+import { ticketApi, attachmentsApi, uploadAttachment, Ticket, Attachment } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
 import { StatusBadge } from '@/components/app/status-badge';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,24 +25,60 @@ export default function TicketDetailPage() {
   const router = useRouter();
   const user = useUser();
   const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [pendingModalOpen, setPendingModalOpen] = useState(false);
   const [pendingReason, setPendingReason] = useState('');
   const [disputeModalOpen, setDisputeModalOpen] = useState(false);
   const [disputeComment, setDisputeComment] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadAttachments = () =>
+    attachmentsApi.list(params.id).then((res) => setAttachments(res.data.data || []));
 
   const load = () =>
     ticketApi
       .get(params.id)
       .then((res) => setTicket(res.data.data))
+      .then(() => loadAttachments())
       .catch(() => setError('Ticket not found or you do not have access to it.'));
 
   useEffect(() => {
     load().finally(() => setIsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
+
+  const handleUpload = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setUploading(true);
+    const failures: string[] = [];
+    for (const file of Array.from(fileList)) {
+      try {
+        await uploadAttachment(params.id, file);
+      } catch {
+        failures.push(file.name);
+      }
+    }
+    if (failures.length) {
+      toast.error(`Couldn't upload: ${failures.join(', ')}`);
+    } else {
+      toast.success('Uploaded');
+    }
+    await loadAttachments();
+    setUploading(false);
+  };
+
+  const download = async (attachment: Attachment) => {
+    try {
+      const res = await attachmentsApi.getDownloadUrl(attachment.id);
+      window.open(res.data.data.url, '_blank');
+    } catch {
+      toast.error('Could not get a download link');
+    }
+  };
 
   const isRequester = ticket?.requester_id === user.id;
   const isAssignee = ticket?.assigned_to === user.id;
@@ -167,6 +205,45 @@ export default function TicketDetailPage() {
               </>
             )}
           </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-foreground">Attachments</h2>
+          <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+            {uploading ? 'Uploading...' : '+ Add file'}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => handleUpload(e.target.files)}
+          />
+        </div>
+        {attachments.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">No files attached yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {attachments.map((a) => (
+              <li key={a.id} className="flex items-center justify-between rounded-md bg-secondary px-3 py-2 text-sm">
+                <span className="flex items-center gap-2 text-foreground">
+                  <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
+                  {a.original_filename}
+                  {a.status === 'pending' && <Badge variant="amber">Scanning</Badge>}
+                </span>
+                <button
+                  onClick={() => download(a)}
+                  disabled={a.status === 'pending'}
+                  className="text-muted-foreground hover:text-primary disabled:opacity-40"
+                  aria-label={`Download ${a.original_filename}`}
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 

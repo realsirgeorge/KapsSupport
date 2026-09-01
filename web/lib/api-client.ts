@@ -77,6 +77,17 @@ export interface ListTicketsParams {
   limit?: number;
 }
 
+export interface Attachment {
+  id: string;
+  ticket_id: string;
+  uploaded_by: string;
+  original_filename: string;
+  content_type: string;
+  size_bytes: number;
+  status: 'pending' | 'safe' | 'rejected';
+  created_at: string;
+}
+
 // Ticket endpoints
 export const ticketApi = {
   list: (params: ListTicketsParams) => apiClient.get('/tickets', { params }),
@@ -172,3 +183,38 @@ export const availabilityApi = {
   reject: (id: string) => apiClient.post(`/availability-requests/${id}/reject`),
   end: (id: string) => apiClient.post(`/availability-requests/${id}/end`),
 };
+
+// Attachment endpoints
+export const attachmentsApi = {
+  list: (ticketId: string) => apiClient.get(`/tickets/${ticketId}/attachments`),
+  requestUpload: (ticketId: string, data: { filename: string; content_type: string; size_bytes: number }) =>
+    apiClient.post(`/tickets/${ticketId}/attachments/request-upload`, data),
+  confirm: (ticketId: string, attachmentId: string) =>
+    apiClient.post(`/tickets/${ticketId}/attachments/${attachmentId}/confirm`),
+  getDownloadUrl: (attachmentId: string) => apiClient.get(`/attachments/${attachmentId}/download`),
+};
+
+/**
+ * Full 3-step upload: request a presigned URL, PUT the file straight to
+ * MinIO (never through our API), then confirm so the worker's validation
+ * job picks it up. Throws on any step's failure — caller shows one error.
+ */
+export async function uploadAttachment(ticketId: string, file: File): Promise<void> {
+  const { data } = await attachmentsApi.requestUpload(ticketId, {
+    filename: file.name,
+    content_type: file.type,
+    size_bytes: file.size,
+  });
+  const { attachment_id, upload_url } = data.data;
+
+  const putRes = await fetch(upload_url, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': file.type },
+  });
+  if (!putRes.ok) {
+    throw new Error(`Upload to storage failed (${putRes.status})`);
+  }
+
+  await attachmentsApi.confirm(ticketId, attachment_id);
+}
