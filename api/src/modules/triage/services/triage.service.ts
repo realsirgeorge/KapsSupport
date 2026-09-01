@@ -93,29 +93,38 @@ export class TriageService {
       throw new BadRequestException('Category not found');
     }
 
-    // Update the ticket with new category
-    const updateQuery = `
-      UPDATE tickets
-      SET confirmed_category_id = $1, updated_at = now()
-      WHERE id = $2
-      RETURNING *
-    `;
-    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
-      manager.query(updateQuery, [categoryId, ticketId]),
-    );
-
-    // Check if reassignment is required (if assigned to someone outside new category's team)
+    // FR-2.4: recategorizing an already-assigned ticket to a different
+    // team's category must never leave it assigned to someone outside that
+    // team, even transiently — the DB's check_assignee_matches_category
+    // trigger enforces exactly this and will reject the UPDATE below with a
+    // raw exception if we set confirmed_category_id while an incompatible
+    // assigned_to is still in place. So: check first, and if the current
+    // assignee no longer fits, clear the assignment in the same statement
+    // (satisfies the trigger) and tell the caller reassignment is required.
     let reassignment_required = false;
-    if (updatedTicket.assigned_to) {
-      const assigneeQuery = `
-        SELECT team_id FROM users WHERE id = $1
-      `;
-      const [assignee] = await this.dataSource.query(assigneeQuery, [updatedTicket.assigned_to]);
-
+    if (ticket.assigned_to) {
+      const [assignee] = await this.dataSource.query('SELECT team_id FROM users WHERE id = $1', [
+        ticket.assigned_to,
+      ]);
       if (assignee && assignee.team_id !== category.team_id) {
         reassignment_required = true;
       }
     }
+
+    const updateQuery = reassignment_required
+      ? `UPDATE tickets
+         SET confirmed_category_id = $1, assigned_to = NULL, assigned_by = NULL, assigned_at = NULL,
+             status = 'new', updated_at = now()
+         WHERE id = $2
+         RETURNING *`
+      : `UPDATE tickets
+         SET confirmed_category_id = $1, updated_at = now()
+         WHERE id = $2
+         RETURNING *`;
+
+    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(updateQuery, [categoryId, ticketId]),
+    );
 
     this.eventEmitter.emit('ticket.category_confirmed', {
       ticket: updatedTicket,
@@ -213,6 +222,15 @@ export class TriageService {
       throw new ForbiddenException(
         'Only Support/Triage or Manager (own team) can assign tickets',
       );
+    }
+
+    // FR-2.6: a ticket cannot be assigned without a confirmed category —
+    // a required, blocking step. ticket.team_id comes from a LEFT JOIN on
+    // confirmed_category_id, so it's null exactly when no category is
+    // confirmed yet; without this explicit check the team-match check below
+    // silently no-ops on a null team_id and assignment goes through anyway.
+    if (!ticket.confirmed_category_id) {
+      throw new BadRequestException('Category must be confirmed before a ticket can be assigned');
     }
 
     // Validate assignee exists

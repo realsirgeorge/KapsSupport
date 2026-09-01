@@ -49,23 +49,45 @@ export class TicketService {
     this.stateMachine = new TicketStateMachine();
   }
 
+  /** team_id means team membership, not management — see with-actor.ts / manager.service.ts for the same fix elsewhere. */
+  private async getManagesTeamId(userId: string): Promise<string | null> {
+    const [team] = await this.dataSource.query('SELECT id FROM teams WHERE manager_id = $1 LIMIT 1', [userId]);
+    return team ? team.id : null;
+  }
+
   /**
    * Shared authorization module: scope tickets by user's role and team/site.
    * Returns SQL WHERE conditions (ANDed) and their params, starting at $1.
+   *
+   * FR-3.4 (Manager sees all team tickets) and FR-4.1/4.2 (Team Member sees
+   * ONLY their own assigned + own created, never a teammate's) are
+   * different visibility rules, even though both roles have a team_id.
+   * Deriving manages_team_id here is what actually distinguishes them --
+   * checking team_id alone would (and until this fix, did) grant every
+   * plain Team Member manager-level visibility into the whole team.
    */
-  private scopeTicketsForUser(user: User): { conditions: string[]; params: any[] } {
+  private async scopeTicketsForUser(user: User): Promise<{ conditions: string[]; params: any[] }> {
     if (user.is_admin || user.is_executive || user.is_support_triage) {
       // Admin, Executive, and Support/Triage see all tickets
       return { conditions: [], params: [] };
     }
 
-    if (user.team_id) {
-      // Team Member / Manager: see own created + own team's + own assigned
+    const managesTeamId = await this.getManagesTeamId(user.id);
+    if (managesTeamId) {
+      // Manager: own created + entire team's tickets regardless of holder (FR-3.4/3.6)
       return {
         conditions: [
-          `(ticket.requester_id = $1 OR ticket.assigned_to = $1 OR ticket.confirmed_category_id IN (SELECT id FROM categories WHERE team_id = $2))`,
+          `(ticket.requester_id = $1 OR ticket.confirmed_category_id IN (SELECT id FROM categories WHERE team_id = $2))`,
         ],
-        params: [user.id, user.team_id],
+        params: [user.id, managesTeamId],
+      };
+    }
+
+    if (user.team_id) {
+      // Team Member: ONLY tickets assigned to them + tickets they created (FR-4.1/4.2)
+      return {
+        conditions: ['(ticket.requester_id = $1 OR ticket.assigned_to = $1)'],
+        params: [user.id],
       };
     }
 
@@ -87,7 +109,7 @@ export class TicketService {
       limit?: number;
     } = {},
   ): Promise<{ data: Ticket[]; total: number; page: number; limit: number }> {
-    const scope = this.scopeTicketsForUser(user);
+    const scope = await this.scopeTicketsForUser(user);
     const conditions = [...scope.conditions];
     const params = [...scope.params];
 
@@ -144,7 +166,7 @@ export class TicketService {
    * Get a single ticket (with authorization check).
    */
   async getTicket(ticketId: string, user: User): Promise<Ticket> {
-    const scope = this.scopeTicketsForUser(user);
+    const scope = await this.scopeTicketsForUser(user);
     const params = [...scope.params, ticketId];
     const conditions = [...scope.conditions, `ticket.id = $${params.length}`];
 
@@ -343,7 +365,7 @@ export class TicketService {
    * app.current_user_id fix — actor_name is null in that case too.
    */
   async getRecentActivity(user: User, limit = 8): Promise<any[]> {
-    const scope = this.scopeTicketsForUser(user);
+    const scope = await this.scopeTicketsForUser(user);
     const params = [...scope.params];
     const whereClause = scope.conditions.length ? `WHERE ${scope.conditions.join(' AND ')}` : '';
 
