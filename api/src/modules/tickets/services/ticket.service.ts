@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, ForbiddenException, NotFoundException 
 import { DataSource } from 'typeorm';
 import { TicketStateMachine, TicketStatus } from '../states/ticket-state-machine';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { withActor } from '../../../database/with-actor';
 
 export interface User {
   id: string;
@@ -260,16 +261,18 @@ export class TicketService {
       pendingConfirmationAtClause = ', pending_confirmation_at = now()';
     }
 
-    const [updatedTicket] = await this.dataSource.query(
-      `UPDATE tickets
-       SET status = $1,
-           pending_reason = $2,
-           updated_at = now()
-           ${resolvedAtClause}
-           ${pendingConfirmationAtClause}
-       WHERE id = $3
-       RETURNING *`,
-      [finalStatus, newStatus === TicketStatus.PENDING ? pending_reason : null, ticketId],
+    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(
+        `UPDATE tickets
+         SET status = $1,
+             pending_reason = $2,
+             updated_at = now()
+             ${resolvedAtClause}
+             ${pendingConfirmationAtClause}
+         WHERE id = $3
+         RETURNING *`,
+        [finalStatus, newStatus === TicketStatus.PENDING ? pending_reason : null, ticketId],
+      ),
     );
 
     // Emit event for audit logging and notifications
@@ -306,17 +309,21 @@ export class TicketService {
     let updatedTicket: Ticket;
 
     if (action === 'confirm') {
-      [updatedTicket] = await this.dataSource.query(
-        `UPDATE tickets SET status = $1, closed_at = now(), updated_at = now() WHERE id = $2 RETURNING *`,
-        [TicketStatus.CLOSED, ticketId],
+      [updatedTicket] = await withActor(this.dataSource, requester.id, (manager) =>
+        manager.query(
+          `UPDATE tickets SET status = $1, closed_at = now(), updated_at = now() WHERE id = $2 RETURNING *`,
+          [TicketStatus.CLOSED, ticketId],
+        ),
       );
 
       this.eventEmitter.emit('ticket.confirmed', { ticket: updatedTicket, actor_id: requester.id });
     } else {
       // Reopen and return to same Team Member (assigned_to stays the same)
-      [updatedTicket] = await this.dataSource.query(
-        `UPDATE tickets SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
-        [TicketStatus.REOPENED, ticketId],
+      [updatedTicket] = await withActor(this.dataSource, requester.id, (manager) =>
+        manager.query(
+          `UPDATE tickets SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+          [TicketStatus.REOPENED, ticketId],
+        ),
       );
 
       this.eventEmitter.emit('ticket.disputed', {

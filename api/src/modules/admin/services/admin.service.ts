@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { withActor } from '../../../database/with-actor';
 
 // Inline interfaces matching project pattern
 export interface User {
@@ -685,9 +686,8 @@ export class AdminService {
     }
 
     // Update ticket with new site
-    await this.dataSource.query(
-      `UPDATE tickets SET site_id = $1, updated_at = $2 WHERE id = $3`,
-      [siteId, new Date(), ticketId],
+    await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(`UPDATE tickets SET site_id = $1, updated_at = $2 WHERE id = $3`, [siteId, new Date(), ticketId]),
     );
 
     this.eventEmitter.emit('ticket.site_corrected', {

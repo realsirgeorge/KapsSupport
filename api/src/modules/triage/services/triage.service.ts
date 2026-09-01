@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { withActor } from '../../../database/with-actor';
 
 export interface User {
   id: string;
@@ -93,7 +94,9 @@ export class TriageService {
       WHERE id = $2
       RETURNING *
     `;
-    const [updatedTicket] = await this.dataSource.query(updateQuery, [categoryId, ticketId]);
+    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(updateQuery, [categoryId, ticketId]),
+    );
 
     // Check if reassignment is required (if assigned to someone outside new category's team)
     let reassignment_required = false;
@@ -160,7 +163,9 @@ export class TriageService {
       WHERE id = $2
       RETURNING *
     `;
-    const [updatedTicket] = await this.dataSource.query(updateQuery, [priority, ticketId]);
+    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(updateQuery, [priority, ticketId]),
+    );
 
     this.eventEmitter.emit('ticket.priority_confirmed', {
       ticket: updatedTicket,
@@ -232,11 +237,9 @@ export class TriageService {
       WHERE id = $3
       RETURNING *
     `;
-    const [updatedTicket] = await this.dataSource.query(updateQuery, [
-      assignee_id,
-      user.id,
-      ticketId,
-    ]);
+    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(updateQuery, [assignee_id, user.id, ticketId]),
+    );
 
     this.eventEmitter.emit('ticket.assigned', {
       ticket: updatedTicket,

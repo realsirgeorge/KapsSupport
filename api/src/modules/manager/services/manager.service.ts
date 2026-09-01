@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { withActor } from '../../../database/with-actor';
 
 export interface User {
   id: string;
@@ -292,13 +293,15 @@ export class ManagerService {
 
     // Update ticket
     const now = new Date();
-    await this.dataSource.query(
-      `
-      UPDATE tickets
-      SET assigned_to = $1, assigned_by = $2, assigned_at = $3, updated_at = $4
-      WHERE id = $5
-      `,
-      [assigneeId, user.id, now, now, ticketId],
+    await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(
+        `
+        UPDATE tickets
+        SET assigned_to = $1, assigned_by = $2, assigned_at = $3, updated_at = $4
+        WHERE id = $5
+        `,
+        [assigneeId, user.id, now, now, ticketId],
+      ),
     );
 
     // Fetch updated ticket
@@ -349,19 +352,21 @@ export class ManagerService {
 
     // Update ticket: clear category, clear assignment
     const now = new Date();
-    await this.dataSource.query(
-      `
-      UPDATE tickets
-      SET
-        confirmed_category_id = NULL,
-        assigned_to = NULL,
-        assigned_by = NULL,
-        assigned_at = NULL,
-        status = 'new',
-        updated_at = $1
-      WHERE id = $2
-      `,
-      [now, ticketId],
+    await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(
+        `
+        UPDATE tickets
+        SET
+          confirmed_category_id = NULL,
+          assigned_to = NULL,
+          assigned_by = NULL,
+          assigned_at = NULL,
+          status = 'new',
+          updated_at = $1
+        WHERE id = $2
+        `,
+        [now, ticketId],
+      ),
     );
 
     // Fetch updated ticket
