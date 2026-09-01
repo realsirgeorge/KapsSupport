@@ -1,9 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { dashboardApi } from '@/lib/api-client';
+import { useEffect, useMemo, useState } from 'react';
+import { teamApi, Ticket } from '@/lib/api-client';
+import { useUser } from '@/components/app/user-context';
+import { useSearch } from '@/components/app/search-context';
+import { StatCard } from '@/components/app/stat-card';
+import { StatusBadge } from '@/components/app/status-badge';
+import { WorkloadBar } from '@/components/app/workload-bar';
+import { Button } from '@/components/ui/button';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { ageLabel } from '@/lib/format';
+import { toast } from 'sonner';
 
-interface TeamStats {
+interface Stats {
   open_tickets: number;
   avg_resolution_hours: number;
   aging_over_3_days: number;
@@ -11,81 +20,138 @@ interface TeamStats {
   per_member: Array<{ user_id: string; name: string; open_tickets: number }>;
 }
 
+interface Member {
+  id: string;
+  name: string;
+  is_unavailable: boolean;
+  open_tickets: number;
+}
+
 export default function TeamDashboardPage() {
-  const [stats, setStats] = useState<TeamStats | null>(null);
+  const user = useUser();
+  const { query } = useSearch();
+  const teamId = user.manages_team_id!;
+
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [reassignTarget, setReassignTarget] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const load = () =>
+    Promise.all([teamApi.getStats(teamId), teamApi.getWorkload(teamId), teamApi.getTickets(teamId, { limit: 50 })]).then(
+      ([statsRes, workloadRes, ticketsRes]) => {
+        setStats(statsRes.data.data);
+        setMembers(workloadRes.data.data || []);
+        setTickets(ticketsRes.data.data || []);
+      },
+    );
+
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        // Mock team ID - in real app would come from auth context
-        const response = await dashboardApi.counters();
-        // Would load team stats
-        setStats({
-          open_tickets: 12,
-          avg_resolution_hours: 4.2,
-          aging_over_3_days: 2,
-          team_size: 6,
-          per_member: [
-            { user_id: '1', name: 'Alice Johnson', open_tickets: 3 },
-            { user_id: '2', name: 'Bob Smith', open_tickets: 2 },
-            { user_id: '3', name: 'Carol White', open_tickets: 4 },
-          ],
-        });
-      } catch (err) {
-        console.error('Failed to load team stats:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    load().finally(() => setIsLoading(false));
+  }, [teamId]);
 
-    fetchStats();
-  }, []);
+  const reassign = async (ticketId: string, assigneeId: string) => {
+    setReassignTarget(null);
+    try {
+      await teamApi.reassign(ticketId, assigneeId);
+      toast.success('Ticket reassigned');
+      await load();
+    } catch {
+      toast.error('Could not reassign — check the member is on this team and available');
+    }
+  };
 
-  if (isLoading) return <div className="p-6">Loading team dashboard...</div>;
-  if (!stats) return <div className="p-6 text-red-400">Failed to load team stats</div>;
+  const filtered = useMemo(() => {
+    if (!query.trim()) return tickets;
+    const q = query.toLowerCase();
+    return tickets.filter((t) => t.ticket_number.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q));
+  }, [tickets, query]);
+
+  const maxWorkload = Math.max(1, ...members.map((m) => m.open_tickets));
+
+  if (isLoading || !stats) {
+    return <div className="text-muted-foreground">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-white">Team Dashboard</h2>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Team dashboard</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Overview of tickets assigned to your team</p>
+      </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg bg-gray-800 p-4">
-          <div className="text-sm text-gray-400">Open Tickets</div>
-          <div className="mt-1 text-3xl font-bold text-green-400">{stats.open_tickets}</div>
-        </div>
-        <div className="rounded-lg bg-gray-800 p-4">
-          <div className="text-sm text-gray-400">Avg Resolution Time</div>
-          <div className="mt-1 text-3xl font-bold text-blue-400">{stats.avg_resolution_hours}h</div>
-        </div>
-        <div className="rounded-lg bg-gray-800 p-4">
-          <div className="text-sm text-gray-400">Aging >3 Days</div>
-          <div className="mt-1 text-3xl font-bold text-yellow-400">{stats.aging_over_3_days}</div>
-        </div>
-        <div className="rounded-lg bg-gray-800 p-4">
-          <div className="text-sm text-gray-400">Team Size</div>
-          <div className="mt-1 text-3xl font-bold text-purple-400">{stats.team_size}</div>
+      <div className="grid grid-cols-4 gap-4">
+        <StatCard label="Open team tickets" value={stats.open_tickets} primary />
+        <StatCard label="Avg resolution time" value={`${stats.avg_resolution_hours.toFixed(1)}h`} />
+        <StatCard label="Aging (>3 days)" value={stats.aging_over_3_days} />
+        <StatCard label="Team members" value={stats.team_size} />
+      </div>
+
+      <div>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team workload</p>
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
+          {members.map((m) => (
+            <WorkloadBar key={m.id} label={m.name} value={m.open_tickets} max={maxWorkload} />
+          ))}
         </div>
       </div>
 
-      <div className="rounded-lg bg-gray-800 p-6">
-        <h3 className="text-lg font-bold text-white">Workload by Member</h3>
-        <div className="mt-4 space-y-3">
-          {stats.per_member.map((member) => (
-            <div key={member.user_id} className="flex items-center justify-between">
-              <span className="text-gray-300">{member.name}</span>
-              <div className="flex items-center gap-3">
-                <div className="h-2 w-32 rounded-full bg-gray-700">
-                  <div
-                    className="h-full rounded-full bg-green-600"
-                    style={{ width: `${(member.open_tickets / stats.open_tickets) * 100}%` }}
-                  />
-                </div>
-                <span className="text-sm font-semibold text-gray-300">{member.open_tickets}</span>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team tickets</p>
+        {filtered.length === 0 ? (
+          <div className="rounded-lg border border-border bg-card p-10 text-center text-muted-foreground">
+            No tickets match.
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="px-6 py-3 font-medium">Ticket</th>
+                  <th className="px-6 py-3 font-medium">Subject</th>
+                  <th className="px-6 py-3 font-medium">Assignee</th>
+                  <th className="px-6 py-3 font-medium">Status</th>
+                  <th className="px-6 py-3 font-medium">Age</th>
+                  <th className="px-6 py-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((ticket) => (
+                  <tr key={ticket.id} className="border-b border-border last:border-0 hover:bg-accent/50">
+                    <td className="px-6 py-3 font-mono text-xs text-muted-foreground">{ticket.ticket_number}</td>
+                    <td className="px-6 py-3 text-foreground">{ticket.subject}</td>
+                    <td className="px-6 py-3 text-muted-foreground">{ticket.assignee_name ?? '—'}</td>
+                    <td className="px-6 py-3">
+                      <StatusBadge status={ticket.status} pendingReason={ticket.pending_reason} createdAt={ticket.created_at} />
+                    </td>
+                    <td className="px-6 py-3 text-muted-foreground">{ageLabel(ticket.created_at)}</td>
+                    <td className="px-6 py-3">
+                      {reassignTarget === ticket.id ? (
+                        <Select onValueChange={(assigneeId) => reassign(ticket.id, assigneeId)}>
+                          <SelectTrigger className="h-8 w-40 text-xs">
+                            <SelectValue placeholder="Choose member" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {members.map((m) => (
+                              <SelectItem key={m.id} value={m.id} disabled={m.is_unavailable}>
+                                {m.name} {m.is_unavailable ? '(unavailable)' : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => setReassignTarget(ticket.id)}>
+                          Reassign
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

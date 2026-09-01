@@ -30,6 +30,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       is_support_triage: payload.is_support_triage,
       is_executive: payload.is_executive,
       is_unavailable: payload.is_unavailable,
+      manages_team_id: payload.manages_team_id,
     };
   }
 }

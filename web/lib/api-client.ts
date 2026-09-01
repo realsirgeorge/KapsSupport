@@ -18,9 +18,14 @@ export interface Ticket {
   description: string;
   status: 'new' | 'assigned' | 'in_progress' | 'pending' | 'resolved' | 'pending_confirmation' | 'closed' | 'reopened';
   requester_id: string;
+  requester_name?: string;
   assigned_to?: string;
+  assignee_name?: string;
   site_id: string;
+  site_name?: string;
+  suggested_category_id?: string;
   confirmed_category_id?: string;
+  category_name?: string;
   confirmed_priority?: 'low' | 'medium' | 'high' | 'urgent';
   pending_reason?: string;
   pending_confirmation_days?: number;
@@ -28,6 +33,19 @@ export interface Ticket {
   updated_at: string;
   resolved_at?: string;
   closed_at?: string;
+}
+
+export interface Site {
+  id: string;
+  name: string;
+  region?: string;
+  active: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  team_id: string;
 }
 
 export interface User {
@@ -104,4 +122,51 @@ export const authApi = {
   login: (email: string, password: string) =>
     apiClient.post('/auth/login', { email, password }),
   logout: () => apiClient.post('/auth/logout'),
+};
+
+// Reference data (read-only lists used across forms/pickers)
+export const sitesApi = {
+  list: () => apiClient.get('/sites'),
+};
+
+export const categoriesApi = {
+  list: () => apiClient.get('/categories'),
+};
+
+// Admin endpoints
+export const adminApi = {
+  teams: {
+    list: () => apiClient.get('/teams'),
+    create: (data: { name: string; manager_id?: string }) => apiClient.post('/teams', data),
+    update: (id: string, data: Partial<{ name: string; manager_id: string; active: boolean }>) =>
+      apiClient.patch(`/teams/${id}`, data),
+    remove: (id: string) => apiClient.delete(`/teams/${id}`),
+  },
+  sites: {
+    create: (data: { name: string; region?: string }) => apiClient.post('/sites', data),
+    update: (id: string, data: Partial<{ name: string; region: string; active: boolean }>) =>
+      apiClient.patch(`/sites/${id}`, data),
+  },
+  categories: {
+    create: (data: { name: string; team_id: string }) => apiClient.post('/categories', data),
+    update: (id: string, data: Partial<{ name: string; team_id: string }>) =>
+      apiClient.patch(`/categories/${id}`, data),
+  },
+  users: {
+    list: () => apiClient.get('/users'),
+    updateRoles: (
+      id: string,
+      data: Partial<{ is_admin: boolean; is_support_triage: boolean; is_executive: boolean; team_id: string | null }>,
+    ) => apiClient.patch(`/users/${id}/roles`, data),
+  },
+};
+
+// Availability endpoints
+export const availabilityApi = {
+  list: (status?: string) => apiClient.get('/availability-requests', { params: status ? { status } : undefined }),
+  request: (data: { type: 'range' | 'toggle'; start_date?: string; end_date?: string }) =>
+    apiClient.post('/availability-requests', data),
+  approve: (id: string) => apiClient.post(`/availability-requests/${id}/approve`),
+  reject: (id: string) => apiClient.post(`/availability-requests/${id}/reject`),
+  end: (id: string) => apiClient.post(`/availability-requests/${id}/end`),
 };

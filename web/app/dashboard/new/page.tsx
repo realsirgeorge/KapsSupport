@@ -1,25 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ticketApi } from '@/lib/api-client';
+import { ticketApi, sitesApi, categoriesApi, Site, Category } from '@/lib/api-client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 export default function CreateTicketPage() {
   const router = useRouter();
+  const [sites, setSites] = useState<Site[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [formData, setFormData] = useState({
-    subject: '',
-    description: '',
-    site_id: '',
-    suggested_category_id: '',
-    suggested_priority: 'medium',
-  });
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [siteId, setSiteId] = useState('');
+  const [categoryId, setCategoryId] = useState('');
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  useEffect(() => {
+    Promise.all([sitesApi.list(), categoriesApi.list()]).then(([sitesRes, catsRes]) => {
+      setSites(sitesRes.data.data || []);
+      setCategories(catsRes.data.data || []);
+    });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,121 +36,117 @@ export default function CreateTicketPage() {
     setError('');
 
     try {
-      const response = await ticketApi.create({
-        subject: formData.subject,
-        description: formData.description,
-        site_id: formData.site_id,
-        suggested_category_id: formData.suggested_category_id || undefined,
-        suggested_priority: formData.suggested_priority,
+      const res = await ticketApi.create({
+        subject,
+        description,
+        site_id: siteId,
+        suggested_category_id: categoryId || undefined,
       });
-
-      router.push(`/dashboard/tickets/${response.data.data.id}`);
+      toast.success('Ticket submitted');
+      router.push(`/dashboard/tickets/${res.data.data.id}`);
     } catch (err) {
-      setError('Failed to create ticket');
-      console.error(err);
+      setError('Failed to create ticket. Check that all required fields are filled in.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="max-w-2xl">
-      <h2 className="mb-6 text-2xl font-bold text-white">Create Ticket</h2>
+    <div className="mx-auto max-w-2xl">
+      <div className="rounded-lg border border-border bg-card p-8">
+        <h1 className="text-xl font-bold text-foreground">New ticket</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Tell us what you need help with — support will confirm the category and route it.
+        </p>
 
-      <form onSubmit={handleSubmit} className="space-y-6 rounded-lg bg-gray-800 p-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-300">Subject *</label>
-          <input
-            type="text"
-            name="subject"
-            value={formData.subject}
-            onChange={handleChange}
-            required
-            className="mt-1 w-full rounded-md border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-            placeholder="Brief description of the issue"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-300">Description *</label>
-          <textarea
-            name="description"
-            value={formData.description}
-            onChange={handleChange}
-            required
-            rows={6}
-            className="mt-1 w-full rounded-md border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-            placeholder="Detailed description of the issue"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-300">Site *</label>
-          <select
-            name="site_id"
-            value={formData.site_id}
-            onChange={handleChange}
-            required
-            className="mt-1 w-full rounded-md border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-          >
-            <option value="">Select a site...</option>
-            <option value="site-1">Westgate</option>
-            <option value="site-2">Downtown</option>
-            <option value="site-3">Airport</option>
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300">Category (Suggested)</label>
-            <select
-              name="suggested_category_id"
-              value={formData.suggested_category_id}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-md border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-            >
-              <option value="">Select category...</option>
-              <option value="cat-1">Fintech</option>
-              <option value="cat-2">Technical</option>
-              <option value="cat-3">ICT</option>
-            </select>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+          <div className="space-y-1.5">
+            <Label htmlFor="subject">Subject</Label>
+            <Input
+              id="subject"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Brief summary of the issue"
+              required
+            />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300">Priority (Suggested)</label>
-            <select
-              name="suggested_priority"
-              value={formData.suggested_priority}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-md border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
+          <div className="space-y-1.5">
+            <Label htmlFor="site">Site</Label>
+            <Select value={siteId} onValueChange={setSiteId} required>
+              <SelectTrigger id="site">
+                <SelectValue placeholder="Which site is this about?" />
+              </SelectTrigger>
+              <SelectContent>
+                {sites.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                    {s.region ? ` — ${s.region}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </div>
 
-        {error && <div className="rounded-md bg-red-900 p-3 text-sm text-red-200">{error}</div>}
+          <div className="space-y-1.5">
+            <Label htmlFor="description">Description</Label>
+            <Textarea
+              id="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What happened, when, and any details that help"
+              rows={5}
+              required
+            />
+          </div>
 
-        <div className="flex gap-3">
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="rounded-md bg-green-600 px-6 py-2 font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {isLoading ? 'Creating...' : 'Create Ticket'}
-          </button>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="rounded-md border border-gray-600 px-6 py-2 font-semibold text-gray-300 hover:bg-gray-700"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
+          <div className="space-y-1.5">
+            <Label>Category (your best guess — support will confirm)</Label>
+            <div className="flex flex-wrap gap-2">
+              {categories.map((c) => {
+                const selected = categoryId === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCategoryId(selected ? '' : c.id)}
+                    className={cn(
+                      'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                      selected
+                        ? 'border-status-blue bg-status-blue/10 text-status-blue'
+                        : 'border-border bg-secondary text-foreground hover:bg-accent',
+                    )}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Attachments (optional)</Label>
+            <div className="flex h-24 cursor-not-allowed items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+              File uploads aren&apos;t available yet
+            </div>
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => router.back()}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? 'Submitting...' : 'Submit ticket'}
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

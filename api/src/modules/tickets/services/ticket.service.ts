@@ -125,7 +125,12 @@ export class TicketService {
     const total = parseInt(countResult[0].count || '0', 10);
 
     const data = await this.dataSource.query(
-      `SELECT ticket.* FROM tickets ticket ${whereClause}
+      `SELECT ticket.*, c.name as category_name, s.name as site_name, au.name as assignee_name
+       FROM tickets ticket
+       LEFT JOIN categories c ON ticket.confirmed_category_id = c.id
+       LEFT JOIN sites s ON ticket.site_id = s.id
+       LEFT JOIN users au ON ticket.assigned_to = au.id
+       ${whereClause}
        ORDER BY ticket.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset],
@@ -143,7 +148,14 @@ export class TicketService {
     const conditions = [...scope.conditions, `ticket.id = $${params.length}`];
 
     const [ticket] = await this.dataSource.query(
-      `SELECT ticket.* FROM tickets ticket WHERE ${conditions.join(' AND ')}`,
+      `SELECT ticket.*, c.name as category_name, s.name as site_name,
+              au.name as assignee_name, ru.name as requester_name
+       FROM tickets ticket
+       LEFT JOIN categories c ON ticket.confirmed_category_id = c.id
+       LEFT JOIN sites s ON ticket.site_id = s.id
+       LEFT JOIN users au ON ticket.assigned_to = au.id
+       LEFT JOIN users ru ON ticket.requester_id = ru.id
+       WHERE ${conditions.join(' AND ')}`,
       params,
     );
 

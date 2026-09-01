@@ -29,6 +29,8 @@ export class AuthService {
   }
 
   async login(user: any) {
+    const managesTeamId = await this.getManagesTeamId(user.id);
+
     const payload = {
       sub: user.id,
       email: user.email,
@@ -38,6 +40,7 @@ export class AuthService {
       is_support_triage: user.is_support_triage,
       is_executive: user.is_executive,
       is_unavailable: user.is_unavailable,
+      manages_team_id: managesTeamId,
     };
 
     return {
@@ -51,8 +54,21 @@ export class AuthService {
         is_support_triage: user.is_support_triage,
         is_executive: user.is_executive,
         is_unavailable: user.is_unavailable,
+        manages_team_id: managesTeamId,
       },
     };
+  }
+
+  /**
+   * A user's "manages_team_id" is not a stored column — it's derived from
+   * teams.manager_id, same lookup DashboardService/ManagerService use.
+   */
+  private async getManagesTeamId(userId: string): Promise<string | null> {
+    const [team] = await this.dataSource.query(
+      'SELECT id FROM teams WHERE manager_id = $1 LIMIT 1',
+      [userId],
+    );
+    return team ? team.id : null;
   }
 
   async logout(user: any) {

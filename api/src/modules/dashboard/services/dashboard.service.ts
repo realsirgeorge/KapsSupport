@@ -45,6 +45,9 @@ export class DashboardService {
    */
   private async getSystemCounts(): Promise<{
     total_open: number;
+    aging_over_3_days: number;
+    resolved_this_month: number;
+    avg_resolution_hours: number;
     by_team: Array<{ team_name: string; team_id: string; count: number }>;
     by_status: Array<{ status: string; count: number }>;
   }> {
@@ -54,6 +57,28 @@ export class DashboardService {
       [OPEN_STATUSES],
     );
     const total_open = parseInt(totalResult[0].count || '0', 10);
+
+    // Aging: open tickets created more than 3 days ago
+    const agingResult = await this.dataSource.query(
+      `SELECT COUNT(*) as count FROM tickets
+       WHERE status = ANY($1::text[]) AND (now() - created_at) > INTERVAL '3 days'`,
+      [OPEN_STATUSES],
+    );
+    const aging_over_3_days = parseInt(agingResult[0].count || '0', 10);
+
+    // Resolved (closed) this calendar month
+    const resolvedResult = await this.dataSource.query(
+      `SELECT COUNT(*) as count FROM tickets
+       WHERE status = 'closed' AND closed_at >= date_trunc('month', now())`,
+    );
+    const resolved_this_month = parseInt(resolvedResult[0].count || '0', 10);
+
+    // System-wide average resolution time for closed tickets
+    const avgResult = await this.dataSource.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (closed_at - created_at)) / 3600)::NUMERIC as hours
+       FROM tickets WHERE status = 'closed' AND closed_at IS NOT NULL`,
+    );
+    const avg_resolution_hours = parseFloat(avgResult[0]?.hours || '0');
 
     // By team: group by confirmed_category's team
     const byTeamResult = await this.dataSource.query(
@@ -77,22 +102,29 @@ export class DashboardService {
         count: parseInt(row.count || '0', 10),
       }));
 
-    // By status
+    // By status: open statuses as-is, plus pending_confirmation, plus closed in the last 30 days
     const byStatusResult = await this.dataSource.query(
       `SELECT status, COUNT(*) as count
       FROM tickets
-      WHERE status = ANY($1::text[])
+      WHERE status = ANY($1::text[]) OR status = 'pending_confirmation'
       GROUP BY status
       ORDER BY status`,
       [OPEN_STATUSES],
     );
 
-    const by_status = byStatusResult.map((row) => ({
-      status: row.status,
-      count: parseInt(row.count || '0', 10),
-    }));
+    const closedLast30Result = await this.dataSource.query(
+      `SELECT COUNT(*) as count FROM tickets WHERE status = 'closed' AND closed_at >= now() - INTERVAL '30 days'`,
+    );
 
-    return { total_open, by_team, by_status };
+    const by_status = [
+      ...byStatusResult.map((row) => ({
+        status: row.status,
+        count: parseInt(row.count || '0', 10),
+      })),
+      { status: 'closed', count: parseInt(closedLast30Result[0].count || '0', 10) },
+    ];
+
+    return { total_open, aging_over_3_days, resolved_this_month, avg_resolution_hours, by_team, by_status };
   }
 
   /**

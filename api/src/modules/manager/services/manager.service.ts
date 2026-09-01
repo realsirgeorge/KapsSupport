@@ -201,9 +201,10 @@ export class ManagerService {
     await this.validateTeamAccess(teamId, user);
 
     let query = `
-      SELECT t.*
+      SELECT t.*, au.name as assignee_name
       FROM tickets t
       JOIN categories c ON t.confirmed_category_id = c.id
+      LEFT JOIN users au ON t.assigned_to = au.id
       WHERE c.team_id = $1
     `;
     const params_array: any[] = [teamId];

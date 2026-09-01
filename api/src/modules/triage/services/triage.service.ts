@@ -37,10 +37,12 @@ export class TriageService {
       SELECT t.id, t.ticket_number, t.subject, t.status,
              t.confirmed_category_id, t.assigned_to, t.created_at,
              t.suggested_category_id, t.suggested_priority,
-             c.name as category_name, u.name as requester_name
+             c.name as category_name, u.name as requester_name,
+             s.name as site_name
       FROM tickets t
       LEFT JOIN categories c ON t.suggested_category_id = c.id
       LEFT JOIN users u ON t.requester_id = u.id
+      LEFT JOIN sites s ON t.site_id = s.id
       WHERE t.status = 'new'
          OR t.confirmed_category_id IS NULL
          OR t.assigned_to IS NULL

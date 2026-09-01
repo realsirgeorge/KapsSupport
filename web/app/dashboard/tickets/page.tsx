@@ -1,91 +1,145 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ticketApi, Ticket } from '@/lib/api-client';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { ticketApi, Ticket } from '@/lib/api-client';
+import { useUser } from '@/components/app/user-context';
+import { useSearch } from '@/components/app/search-context';
+import { StatCard } from '@/components/app/stat-card';
+import { StatusBadge } from '@/components/app/status-badge';
+import { Button } from '@/components/ui/button';
+import { relativeTime } from '@/lib/format';
 
-export default function MyTicketsPage() {
+const OPEN_STATUSES = new Set(['new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened']);
+
+export default function TicketsPage() {
+  const user = useUser();
+  const { query } = useSearch();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Support/Triage and Admin see every ticket here ("All tickets"); everyone
+  // else sees only tickets they personally submitted ("My tickets"/"My requests").
+  const showAllTickets = user.is_admin || user.is_support_triage;
+
   useEffect(() => {
-    const fetchTickets = async () => {
-      try {
-        const response = await ticketApi.list({ mine: true });
-        setTickets(response.data.data || []);
-      } catch (err) {
-        setError('Failed to load tickets');
-        console.error(err);
-      } finally {
-        setIsLoading(false);
+    let cancelled = false;
+    ticketApi
+      .list(showAllTickets ? { limit: 100 } : { mine: true, limit: 100 })
+      .then((res) => {
+        if (!cancelled) setTickets(res.data.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setError('Failed to load tickets');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAllTickets]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return tickets;
+    const q = query.toLowerCase();
+    return tickets.filter(
+      (t) => t.ticket_number.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q),
+    );
+  }, [tickets, query]);
+
+  // Computed client-side from the fetched list, rather than /me/counters —
+  // that endpoint's shape is keyed by the user's primary role/queue, not by
+  // "counters for the ticket set this particular page is showing".
+  const counters = useMemo(() => {
+    const now = new Date();
+    let open = 0;
+    let pendingConfirmation = 0;
+    let closedThisMonth = 0;
+    for (const t of tickets) {
+      if (OPEN_STATUSES.has(t.status)) open++;
+      if (t.status === 'pending_confirmation') pendingConfirmation++;
+      if (t.status === 'closed' && t.closed_at) {
+        const closedAt = new Date(t.closed_at);
+        if (closedAt.getFullYear() === now.getFullYear() && closedAt.getMonth() === now.getMonth()) {
+          closedThisMonth++;
+        }
       }
-    };
+    }
+    return { open, pendingConfirmation, closedThisMonth };
+  }, [tickets]);
 
-    fetchTickets();
-  }, []);
+  const title = showAllTickets ? 'All tickets' : user.team_id || user.manages_team_id ? 'My requests' : 'My tickets';
+  const subtitle = showAllTickets
+    ? 'Every ticket in the system'
+    : "Track requests you've submitted and their status";
 
-  const getStatusBadge = (status: string) => {
-    const colors: Record<string, string> = {
-      new: 'bg-yellow-900 text-yellow-200',
-      assigned: 'bg-blue-900 text-blue-200',
-      in_progress: 'bg-cyan-900 text-cyan-200',
-      pending: 'bg-orange-900 text-orange-200',
-      resolved: 'bg-purple-900 text-purple-200',
-      pending_confirmation: 'bg-indigo-900 text-indigo-200',
-      closed: 'bg-green-900 text-green-200',
-      reopened: 'bg-red-900 text-red-200',
-    };
-    return colors[status] || 'bg-gray-700 text-gray-200';
-  };
+  if (isLoading) {
+    return <div className="text-muted-foreground">Loading...</div>;
+  }
 
-  if (isLoading) return <div className="p-6">Loading...</div>;
-  if (error) return <div className="p-6 text-red-400">{error}</div>;
+  if (error) {
+    return <div className="text-destructive">{error}</div>;
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-white">My Tickets</h2>
-        <Link
-          href="/dashboard/new"
-          className="rounded-md bg-green-600 px-4 py-2 font-semibold text-white hover:bg-green-700"
-        >
-          Create Ticket
-        </Link>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">{title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        </div>
+        {!showAllTickets && (
+          <Button asChild>
+            <Link href="/dashboard/new">+ New ticket</Link>
+          </Button>
+        )}
       </div>
 
-      {tickets.length === 0 ? (
-        <div className="rounded-lg bg-gray-800 p-6 text-center text-gray-400">
-          No tickets yet. Create one to get started.
+      <div className="grid grid-cols-3 gap-4">
+        <StatCard label="Open tickets" value={counters.open} primary />
+        <StatCard label="Pending confirmation" value={counters.pendingConfirmation} />
+        <StatCard label="Closed this month" value={counters.closedThisMonth} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card p-10 text-center text-muted-foreground">
+          {tickets.length === 0 ? 'No tickets yet.' : 'No tickets match your search.'}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg bg-gray-800">
-          <table className="w-full">
-            <thead className="border-b border-gray-700 bg-gray-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-300">Ticket</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-300">Subject</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-300">Status</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-300">Created</th>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <th className="px-6 py-3 font-medium">Ticket</th>
+                <th className="px-6 py-3 font-medium">Subject</th>
+                <th className="px-6 py-3 font-medium">Category</th>
+                {showAllTickets && <th className="px-6 py-3 font-medium">Requester</th>}
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Updated</th>
               </tr>
             </thead>
             <tbody>
-              {tickets.map((ticket) => (
-                <tr key={ticket.id} className="border-b border-gray-700 hover:bg-gray-700">
+              {filtered.map((ticket) => (
+                <tr key={ticket.id} className="border-b border-border last:border-0 hover:bg-accent/50">
                   <td className="px-6 py-3">
-                    <Link href={`/dashboard/tickets/${ticket.id}`} className="font-mono text-green-400 hover:underline">
+                    <Link
+                      href={`/dashboard/tickets/${ticket.id}`}
+                      className="font-mono text-sm font-medium text-primary hover:underline"
+                    >
                       {ticket.ticket_number}
                     </Link>
                   </td>
-                  <td className="px-6 py-3 text-white">{ticket.subject}</td>
+                  <td className="px-6 py-3 text-foreground">{ticket.subject}</td>
+                  <td className="px-6 py-3 text-muted-foreground">{ticket.category_name ?? '—'}</td>
+                  {showAllTickets && (
+                    <td className="px-6 py-3 text-muted-foreground">{ticket.requester_name ?? '—'}</td>
+                  )}
                   <td className="px-6 py-3">
-                    <span className={`rounded px-2 py-1 text-xs font-semibold ${getStatusBadge(ticket.status)}`}>
-                      {ticket.status.replace(/_/g, ' ')}
-                    </span>
+                    <StatusBadge status={ticket.status} pendingReason={ticket.pending_reason} createdAt={ticket.created_at} />
                   </td>
-                  <td className="px-6 py-3 text-sm text-gray-400">
-                    {new Date(ticket.created_at).toLocaleDateString()}
-                  </td>
+                  <td className="px-6 py-3 text-muted-foreground">{relativeTime(ticket.updated_at)}</td>
                 </tr>
               ))}
             </tbody>
