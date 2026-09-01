@@ -1,14 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { triageApi, teamApi, categoriesApi, dashboardApi, Ticket, Category } from '@/lib/api-client';
+import { Inbox, UserPlus, CheckCircle2 } from 'lucide-react';
+import { triageApi, teamApi, categoriesApi, dashboardApi, ticketApi, Ticket, Category } from '@/lib/api-client';
+import { useUser } from '@/components/app/user-context';
 import { useSearch } from '@/components/app/search-context';
 import { StatCard } from '@/components/app/stat-card';
+import { PageHeader } from '@/components/app/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { WorkloadBar } from '@/components/app/workload-bar';
+import { ActivityFeed } from '@/components/app/activity-feed';
 import { relativeTime } from '@/lib/format';
+import type { ActivityEntry } from '@/lib/activity';
 import { toast } from 'sonner';
 
 interface TeamMember {
@@ -131,11 +136,13 @@ function TicketRow({
 }
 
 export default function IncomingQueuePage() {
+  const user = useUser();
   const { query } = useSearch();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [counters, setCounters] = useState<Counters | null>(null);
   const [workload, setWorkload] = useState<TeamMember[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadQueue = () => {
@@ -143,10 +150,11 @@ export default function IncomingQueuePage() {
   };
 
   useEffect(() => {
-    Promise.all([loadQueue(), categoriesApi.list(), dashboardApi.counters()])
-      .then(([, catsRes, countersRes]) => {
+    Promise.all([loadQueue(), categoriesApi.list(), dashboardApi.counters(), ticketApi.recentActivity(8)])
+      .then(([, catsRes, countersRes, activityRes]) => {
         setCategories(catsRes.data.data || []);
         setCounters(countersRes.data.data);
+        setActivity(activityRes.data.data || []);
       })
       .finally(() => setIsLoading(false));
   }, []);
@@ -179,16 +187,17 @@ export default function IncomingQueuePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Incoming queue</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Confirm category and assign each ticket to a named team member</p>
-      </div>
+      <PageHeader
+        name={user.name}
+        title="Incoming queue"
+        subtitle="Confirm category and assign each ticket to a named team member"
+      />
 
       {counters && (
         <div className="grid grid-cols-3 gap-4">
-          <StatCard label="Awaiting category" value={counters.awaiting_category} primary />
-          <StatCard label="Awaiting assignment" value={counters.awaiting_assignment} />
-          <StatCard label="Assigned today" value={counters.assigned_today} />
+          <StatCard label="Awaiting category" value={counters.awaiting_category} icon={Inbox} primary />
+          <StatCard label="Awaiting assignment" value={counters.awaiting_assignment} icon={UserPlus} />
+          <StatCard label="Assigned today" value={counters.assigned_today} icon={CheckCircle2} />
         </div>
       )}
 
@@ -207,16 +216,25 @@ export default function IncomingQueuePage() {
         )}
       </div>
 
-      {workload.length > 0 && (
+      <div className="grid grid-cols-2 gap-6">
         <div>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team workload</p>
-          <div className="space-y-3 rounded-lg border border-border bg-card p-5">
-            {workload.map((m) => (
-              <WorkloadBar key={m.id} label={m.name} value={m.open_tickets} max={workload[0]?.open_tickets || 1} />
-            ))}
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live activity</p>
+          <div className="rounded-lg border border-border bg-card p-5">
+            <ActivityFeed entries={activity} />
           </div>
         </div>
-      )}
+
+        {workload.length > 0 && (
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team workload</p>
+            <div className="space-y-3 rounded-lg border border-border bg-card p-5">
+              {workload.map((m) => (
+                <WorkloadBar key={m.id} label={m.name} value={m.open_tickets} max={workload[0]?.open_tickets || 1} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

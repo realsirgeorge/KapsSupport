@@ -1,6 +1,9 @@
+import type { Counters } from './counters-context';
+
 export interface NavItem {
   label: string;
   href: string;
+  badgeKey?: keyof Counters | 'triage_queue';
 }
 
 export interface NavSection {
@@ -42,7 +45,7 @@ export function navSections(user: CurrentUser): NavSection[] {
 
   if (user.is_admin || user.is_executive) {
     sections.push({
-      items: [{ label: 'System dashboard', href: '/dashboard/system' }],
+      items: [{ label: 'System dashboard', href: '/dashboard/system', badgeKey: 'total_open' }],
     });
     // Admin CRUD screens (Teams/Sites/Categories/Users) aren't built yet —
     // omitted rather than linking to pages that don't exist.
@@ -51,7 +54,7 @@ export function navSections(user: CurrentUser): NavSection[] {
 
   if (user.manages_team_id) {
     sections.push({
-      items: [{ label: 'Team dashboard', href: '/dashboard/team' }],
+      items: [{ label: 'Team dashboard', href: '/dashboard/team', badgeKey: 'team_open' }],
     });
     sections.push({
       heading: 'Personal',
@@ -63,7 +66,7 @@ export function navSections(user: CurrentUser): NavSection[] {
   if (user.is_support_triage) {
     sections.push({
       items: [
-        { label: 'Incoming queue', href: '/dashboard/triage' },
+        { label: 'Incoming queue', href: '/dashboard/triage', badgeKey: 'triage_queue' },
         { label: 'All tickets', href: '/dashboard/tickets' },
       ],
     });
@@ -72,7 +75,7 @@ export function navSections(user: CurrentUser): NavSection[] {
 
   if (user.team_id) {
     sections.push({
-      items: [{ label: 'Assigned to me', href: '/dashboard/assigned' }],
+      items: [{ label: 'Assigned to me', href: '/dashboard/assigned', badgeKey: 'assigned_open' }],
     });
     sections.push({
       heading: 'Personal',
@@ -83,9 +86,37 @@ export function navSections(user: CurrentUser): NavSection[] {
 
   sections.push({
     items: [
-      { label: 'My tickets', href: '/dashboard/tickets' },
+      { label: 'My tickets', href: '/dashboard/tickets', badgeKey: 'open' },
       { label: 'New ticket', href: '/dashboard/new' },
     ],
   });
   return sections;
+}
+
+export function navBadgeValue(item: NavItem, counters: Counters | null): number | null {
+  if (!counters || !item.badgeKey) return null;
+  if (item.badgeKey === 'triage_queue') {
+    const awaiting = (counters.awaiting_category ?? 0) + (counters.awaiting_assignment ?? 0);
+    return awaiting > 0 ? awaiting : null;
+  }
+  const value = counters[item.badgeKey];
+  return typeof value === 'number' && value > 0 ? value : null;
+}
+
+/**
+ * Single "needs your attention" number for the notification bell, per role.
+ * Deliberately conservative: only surfaces a number when one is directly
+ * available from /me/counters without extra fetches, rather than guessing
+ * at relevance with data this component doesn't have.
+ */
+export function needsAttentionCount(user: CurrentUser, counters: Counters | null): number | null {
+  if (!counters) return null;
+  if (user.is_admin || user.is_executive) return counters.aging_over_3_days ?? null;
+  if (user.manages_team_id) return null;
+  if (user.is_support_triage) {
+    const awaiting = (counters.awaiting_category ?? 0) + (counters.awaiting_assignment ?? 0);
+    return awaiting > 0 ? awaiting : null;
+  }
+  if (user.team_id) return counters.pending_blocked ?? null;
+  return counters.pending_confirmation ?? null;
 }

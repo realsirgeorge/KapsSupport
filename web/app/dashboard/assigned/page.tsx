@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Inbox, PauseCircle, CheckCircle2 } from 'lucide-react';
 import { ticketApi, Ticket } from '@/lib/api-client';
+import { useUser } from '@/components/app/user-context';
 import { useSearch } from '@/components/app/search-context';
 import { StatCard } from '@/components/app/stat-card';
+import { PageHeader } from '@/components/app/page-header';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +25,7 @@ import { toast } from 'sonner';
 const OPEN_STATUSES = new Set(['new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened']);
 
 export default function AssignedToMePage() {
+  const user = useUser();
   const { query } = useSearch();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,15 +85,12 @@ export default function AssignedToMePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Assigned to me</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Update status as you work through your tickets</p>
-      </div>
+      <PageHeader name={user.name} title="Assigned to me" subtitle="Update status as you work through your tickets" />
 
       <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Assigned to me" value={counters.assignedOpen} primary />
-        <StatCard label="Pending (blocked)" value={counters.pendingBlocked} />
-        <StatCard label="Resolved this week" value={counters.resolvedThisWeek} />
+        <StatCard label="Assigned to me" value={counters.assignedOpen} icon={Inbox} primary />
+        <StatCard label="Pending (blocked)" value={counters.pendingBlocked} icon={PauseCircle} />
+        <StatCard label="Resolved this week" value={counters.resolvedThisWeek} icon={CheckCircle2} />
       </div>
 
       <div>

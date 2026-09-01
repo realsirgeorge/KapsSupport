@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { Inbox, Clock3, CheckCircle2 } from 'lucide-react';
 import { ticketApi, Ticket } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
 import { useSearch } from '@/components/app/search-context';
 import { StatCard } from '@/components/app/stat-card';
+import { PageHeader } from '@/components/app/page-header';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Button } from '@/components/ui/button';
 import { relativeTime } from '@/lib/format';
@@ -85,22 +87,23 @@ export default function TicketsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-        {!showAllTickets && (
-          <Button asChild>
-            <Link href="/dashboard/new">+ New ticket</Link>
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        name={user.name}
+        title={title}
+        subtitle={subtitle}
+        action={
+          !showAllTickets && (
+            <Button asChild>
+              <Link href="/dashboard/new">+ New ticket</Link>
+            </Button>
+          )
+        }
+      />
 
       <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Open tickets" value={counters.open} primary />
-        <StatCard label="Pending confirmation" value={counters.pendingConfirmation} />
-        <StatCard label="Closed this month" value={counters.closedThisMonth} />
+        <StatCard label="Open tickets" value={counters.open} icon={Inbox} primary />
+        <StatCard label="Pending confirmation" value={counters.pendingConfirmation} icon={Clock3} />
+        <StatCard label="Closed this month" value={counters.closedThisMonth} icon={CheckCircle2} />
       </div>
 
       {filtered.length === 0 ? (

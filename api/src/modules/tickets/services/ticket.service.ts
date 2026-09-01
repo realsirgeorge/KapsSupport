@@ -335,4 +335,29 @@ export class TicketService {
 
     return updatedTicket;
   }
+
+  /**
+   * Recent audit trail entries across whatever tickets this user is
+   * authorized to see (same scoping as listTickets), for a "live activity"
+   * feed. actor_id can be null for history rows recorded before the
+   * app.current_user_id fix — actor_name is null in that case too.
+   */
+  async getRecentActivity(user: User, limit = 8): Promise<any[]> {
+    const scope = this.scopeTicketsForUser(user);
+    const params = [...scope.params];
+    const whereClause = scope.conditions.length ? `WHERE ${scope.conditions.join(' AND ')}` : '';
+
+    return this.dataSource.query(
+      `SELECT h.id, h.action, h.field_changed, h.old_value, h.new_value, h.created_at,
+              ticket.ticket_number, ticket.id as ticket_id,
+              a.name as actor_name
+       FROM ticket_history h
+       JOIN tickets ticket ON h.ticket_id = ticket.id
+       LEFT JOIN users a ON h.actor_id = a.id
+       ${whereClause}
+       ORDER BY h.created_at DESC
+       LIMIT $${params.length + 1}`,
+      [...params, limit],
+    );
+  }
 }

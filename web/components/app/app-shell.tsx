@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { Bell } from 'lucide-react';
 import { authApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
-import { navSections, roleLabel, type CurrentUser } from './nav-config';
+import { navSections, navBadgeValue, needsAttentionCount, roleLabel, primaryRoute, type CurrentUser } from './nav-config';
 import { useSearch } from './search-context';
+import { useCounters } from './counters-context';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -28,6 +29,10 @@ export function AppShell({ user, children }: AppShellProps) {
   const sections = navSections(user);
   const initial = (user.name || user.email || '?').trim().charAt(0).toUpperCase();
   const { query, setQuery } = useSearch();
+  const counters = useCounters();
+
+  const activeItem = sections.flatMap((s) => s.items).find((item) => pathname === item.href || pathname?.startsWith(item.href + '/'));
+  const attentionCount = needsAttentionCount(user, counters);
 
   const handleLogout = async () => {
     await authApi.logout();
@@ -58,18 +63,29 @@ export function AppShell({ user, children }: AppShellProps) {
               <div className="flex flex-col gap-1">
                 {section.items.map((item) => {
                   const active = pathname === item.href || pathname?.startsWith(item.href + '/');
+                  const badge = navBadgeValue(item, counters);
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
                       className={cn(
-                        'rounded-md border-l-2 px-3 py-2 text-sm transition-colors',
+                        'flex items-center justify-between rounded-md border-l-2 px-3 py-2 text-sm transition-colors',
                         active
                           ? 'border-primary bg-primary/10 font-semibold text-primary'
                           : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
                       )}
                     >
-                      {item.label}
+                      <span>{item.label}</span>
+                      {badge !== null && (
+                        <span
+                          className={cn(
+                            'rounded-full px-1.5 py-0.5 text-xs font-semibold tabular-nums',
+                            active ? 'bg-primary/20 text-primary' : 'bg-secondary text-secondary-foreground',
+                          )}
+                        >
+                          {badge}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -77,10 +93,35 @@ export function AppShell({ user, children }: AppShellProps) {
             </div>
           ))}
         </nav>
+
+        <div className="mt-6 border-t border-border pt-4">
+          <div className="flex items-center gap-3 px-2">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+              {initial}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{user.name || user.email}</p>
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className={cn('h-1.5 w-1.5 rounded-full', user.is_unavailable ? 'bg-status-gray' : 'bg-status-green')} />
+                {user.is_unavailable ? 'Unavailable' : 'Available'}
+              </p>
+            </div>
+          </div>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-4 border-b border-border bg-card/40 px-8 py-4">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">SupportDesk</span>
+            {activeItem && (
+              <>
+                <span className="mx-2">/</span>
+                <span>{activeItem.label}</span>
+              </>
+            )}
+          </div>
+
           <div className="flex-1">
             <Input
               value={query}
@@ -89,6 +130,20 @@ export function AppShell({ user, children }: AppShellProps) {
               className="max-w-sm"
             />
           </div>
+
+          <Link
+            href={primaryRoute(user)}
+            className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={attentionCount ? `${attentionCount} items need attention` : 'Notifications'}
+          >
+            <Bell className="h-4 w-4" />
+            {attentionCount !== null && attentionCount > 0 && (
+              <span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-status-red text-[10px] font-bold text-white">
+                {attentionCount > 9 ? '9+' : attentionCount}
+              </span>
+            )}
+          </Link>
+
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-3 rounded-md px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">

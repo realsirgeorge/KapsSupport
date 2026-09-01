@@ -86,6 +86,7 @@ export const ticketApi = {
     apiClient.patch(`/tickets/${id}/status`, { status, pending_reason: reason }),
   confirmResolution: (id: string, action: 'confirm' | 'dispute', comment?: string) =>
     apiClient.post(`/tickets/${id}/confirm-resolution`, { action, comment }),
+  recentActivity: (limit?: number) => apiClient.get('/tickets/activity', { params: limit ? { limit } : undefined }),
 };
 
 // Triage endpoints

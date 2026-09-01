@@ -4,6 +4,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { AppShell } from '@/components/app/app-shell';
 import { UserProvider } from '@/components/app/user-context';
 import { SearchProvider } from '@/components/app/search-context';
+import { CountersProvider } from '@/components/app/counters-context';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useCurrentUser();
@@ -18,9 +19,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <UserProvider user={user}>
-      <SearchProvider>
-        <AppShell user={user}>{children}</AppShell>
-      </SearchProvider>
+      <CountersProvider>
+        <SearchProvider>
+          <AppShell user={user}>{children}</AppShell>
+        </SearchProvider>
+      </CountersProvider>
     </UserProvider>
   );
 }

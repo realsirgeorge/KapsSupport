@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { dashboardApi } from '@/lib/api-client';
+import { Inbox, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { dashboardApi, ticketApi } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
 import { StatCard } from '@/components/app/stat-card';
 import { Badge } from '@/components/ui/badge';
 import { WorkloadBar } from '@/components/app/workload-bar';
+import { ActivityFeed } from '@/components/app/activity-feed';
+import type { ActivityEntry } from '@/lib/activity';
 
 interface SystemData {
   total_open: number;
@@ -41,12 +44,15 @@ const STATUS_DOT: Record<string, string> = {
 export default function SystemDashboardPage() {
   const user = useUser();
   const [data, setData] = useState<SystemData | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    dashboardApi
-      .system()
-      .then((res) => setData(res.data.data))
+    Promise.all([dashboardApi.system(), ticketApi.recentActivity(8)])
+      .then(([sysRes, activityRes]) => {
+        setData(sysRes.data.data);
+        setActivity(activityRes.data.data || []);
+      })
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -59,7 +65,10 @@ export default function SystemDashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex items-center gap-3">
+        <p className="text-sm text-muted-foreground">
+          {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}, {user.name.split(' ')[0]}.
+        </p>
+        <div className="mt-1 flex items-center gap-3">
           <h1 className="text-2xl font-bold text-foreground">System dashboard</h1>
           {user.is_executive && <Badge variant="blue">Exec view · read-only</Badge>}
         </div>
@@ -67,20 +76,28 @@ export default function SystemDashboardPage() {
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Total open tickets" value={data.total_open} primary />
-        <StatCard label="Aging (>3 days)" value={data.aging_over_3_days} />
-        <StatCard label="Resolved this month" value={data.resolved_this_month} />
-        <StatCard label="Avg resolution time" value={`${data.avg_resolution_hours.toFixed(1)}h`} />
+        <StatCard label="Total open tickets" value={data.total_open} icon={Inbox} primary />
+        <StatCard label="Aging (>3 days)" value={data.aging_over_3_days} icon={AlertTriangle} />
+        <StatCard label="Resolved this month" value={data.resolved_this_month} icon={CheckCircle2} />
+        <StatCard label="Avg resolution time" value={`${data.avg_resolution_hours.toFixed(1)}h`} icon={Clock} />
       </div>
 
-      <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tickets by team</p>
-        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
-          {data.by_team.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No open tickets.</p>
-          ) : (
-            data.by_team.map((t) => <WorkloadBar key={t.team_id} label={t.team_name} value={t.count} max={maxTeam} />)
-          )}
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live activity</p>
+          <div className="rounded-lg border border-border bg-card p-5">
+            <ActivityFeed entries={activity} />
+          </div>
+        </div>
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tickets by team</p>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-5">
+            {data.by_team.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No open tickets.</p>
+            ) : (
+              data.by_team.map((t) => <WorkloadBar key={t.team_id} label={t.team_name} value={t.count} max={maxTeam} />)
+            )}
+          </div>
         </div>
       </div>
 

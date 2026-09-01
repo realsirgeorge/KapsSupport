@@ -1,15 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { teamApi, Ticket } from '@/lib/api-client';
+import { Inbox, Clock, AlertTriangle, Users } from 'lucide-react';
+import { teamApi, ticketApi, Ticket } from '@/lib/api-client';
 import { useUser } from '@/components/app/user-context';
 import { useSearch } from '@/components/app/search-context';
 import { StatCard } from '@/components/app/stat-card';
+import { PageHeader } from '@/components/app/page-header';
 import { StatusBadge } from '@/components/app/status-badge';
 import { WorkloadBar } from '@/components/app/workload-bar';
+import { ActivityFeed } from '@/components/app/activity-feed';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ageLabel } from '@/lib/format';
+import type { ActivityEntry } from '@/lib/activity';
 import { toast } from 'sonner';
 
 interface Stats {
@@ -35,17 +39,22 @@ export default function TeamDashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [reassignTarget, setReassignTarget] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const load = () =>
-    Promise.all([teamApi.getStats(teamId), teamApi.getWorkload(teamId), teamApi.getTickets(teamId, { limit: 50 })]).then(
-      ([statsRes, workloadRes, ticketsRes]) => {
-        setStats(statsRes.data.data);
-        setMembers(workloadRes.data.data || []);
-        setTickets(ticketsRes.data.data || []);
-      },
-    );
+    Promise.all([
+      teamApi.getStats(teamId),
+      teamApi.getWorkload(teamId),
+      teamApi.getTickets(teamId, { limit: 50 }),
+      ticketApi.recentActivity(8),
+    ]).then(([statsRes, workloadRes, ticketsRes, activityRes]) => {
+      setStats(statsRes.data.data);
+      setMembers(workloadRes.data.data || []);
+      setTickets(ticketsRes.data.data || []);
+      setActivity(activityRes.data.data || []);
+    });
 
   useEffect(() => {
     load().finally(() => setIsLoading(false));
@@ -76,24 +85,29 @@ export default function TeamDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Team dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Overview of tickets assigned to your team</p>
-      </div>
+      <PageHeader name={user.name} title="Team dashboard" subtitle="Overview of tickets assigned to your team" />
 
       <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Open team tickets" value={stats.open_tickets} primary />
-        <StatCard label="Avg resolution time" value={`${stats.avg_resolution_hours.toFixed(1)}h`} />
-        <StatCard label="Aging (>3 days)" value={stats.aging_over_3_days} />
-        <StatCard label="Team members" value={stats.team_size} />
+        <StatCard label="Open team tickets" value={stats.open_tickets} icon={Inbox} primary />
+        <StatCard label="Avg resolution time" value={`${stats.avg_resolution_hours.toFixed(1)}h`} icon={Clock} />
+        <StatCard label="Aging (>3 days)" value={stats.aging_over_3_days} icon={AlertTriangle} />
+        <StatCard label="Team members" value={stats.team_size} icon={Users} />
       </div>
 
-      <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team workload</p>
-        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
-          {members.map((m) => (
-            <WorkloadBar key={m.id} label={m.name} value={m.open_tickets} max={maxWorkload} />
-          ))}
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live activity</p>
+          <div className="rounded-lg border border-border bg-card p-5">
+            <ActivityFeed entries={activity} />
+          </div>
+        </div>
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Team workload</p>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-5">
+            {members.map((m) => (
+              <WorkloadBar key={m.id} label={m.name} value={m.open_tickets} max={maxWorkload} />
+            ))}
+          </div>
         </div>
       </div>
 
