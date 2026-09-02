@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
 import { authApi } from '@/lib/api-client';
@@ -15,6 +15,13 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Until React has hydrated, onSubmit is not attached and the browser would
+  // submit the form natively — putting the password in the URL, and from
+  // there into history and any access log. Submitting is blocked until then,
+  // and method="post" keeps credentials out of the query string even if a
+  // native submit somehow gets through.
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +63,7 @@ export default function Login() {
         </div>
 
         <div className="rounded-xl border border-border bg-card p-7 shadow-raised">
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form method="post" onSubmit={handleSubmit} className="space-y-4" noValidate>
             <Field label="Email" htmlFor="email">
               <Input
                 id="email"
@@ -95,7 +102,7 @@ export default function Login() {
               </div>
             )}
 
-            <Button type="submit" disabled={isLoading} className="w-full">
+            <Button type="submit" disabled={isLoading || !ready} className="w-full">
               {isLoading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>

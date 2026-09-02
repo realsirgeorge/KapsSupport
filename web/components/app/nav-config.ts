@@ -40,12 +40,39 @@ export function primaryRoute(user: CurrentUser): string {
   return '/dashboard/tickets';
 }
 
+/**
+ * FR-1.1 is explicit that *any* logged-in user can raise a ticket, and FR-1.2
+ * that a ticket is owned by its creator regardless of role. Previously only a
+ * pure Requester got "New ticket", leaving a Manager, Team Member, or
+ * Support/Triage member with no way to raise one for themselves.
+ * Executives are read-only over *other people's* tickets (FR-6.3); raising
+ * their own is not an edit, so they keep it too.
+ */
+function personalSection(user: CurrentUser): NavSection {
+  const items: NavItem[] = [
+    { label: 'My requests', href: '/dashboard/tickets' },
+    { label: 'New ticket', href: '/dashboard/new' },
+  ];
+  // Availability is a team-membership concept — a Requester has no manager to
+  // approve leave, so the link would only lead to a meaningless empty screen.
+  if (user.team_id || user.manages_team_id) {
+    items.push({ label: 'Availability', href: '/dashboard/availability' });
+  }
+  return { heading: 'Personal', items };
+}
+
 export function navSections(user: CurrentUser): NavSection[] {
   const sections: NavSection[] = [];
 
   if (user.is_admin || user.is_executive) {
     sections.push({
-      items: [{ label: 'System dashboard', href: '/dashboard/system', badgeKey: 'total_open' }],
+      items: [
+        { label: 'System dashboard', href: '/dashboard/system', badgeKey: 'total_open' },
+        // FR-6.1: unrestricted visibility into all tickets. The tickets page
+        // already serves admins the full list — without this link it was
+        // simply unreachable from the navigation.
+        { label: 'All tickets', href: '/dashboard/tickets' },
+      ],
     });
     // Admin CRUD is write access — Executive is read-only system-wide, so
     // these links are Admin-only, not shown to Executives.
@@ -60,6 +87,10 @@ export function navSections(user: CurrentUser): NavSection[] {
         ],
       });
     }
+    sections.push({
+      heading: 'Personal',
+      items: [{ label: 'New ticket', href: '/dashboard/new' }],
+    });
     return sections;
   }
 
@@ -67,13 +98,7 @@ export function navSections(user: CurrentUser): NavSection[] {
     sections.push({
       items: [{ label: 'Team dashboard', href: '/dashboard/team', badgeKey: 'team_open' }],
     });
-    sections.push({
-      heading: 'Personal',
-      items: [
-        { label: 'My requests', href: '/dashboard/tickets' },
-        { label: 'Availability', href: '/dashboard/availability' },
-      ],
-    });
+    sections.push(personalSection(user));
     return sections;
   }
 
@@ -84,6 +109,10 @@ export function navSections(user: CurrentUser): NavSection[] {
         { label: 'All tickets', href: '/dashboard/tickets' },
       ],
     });
+    sections.push({
+      heading: 'Personal',
+      items: [{ label: 'New ticket', href: '/dashboard/new' }],
+    });
     return sections;
   }
 
@@ -91,16 +120,11 @@ export function navSections(user: CurrentUser): NavSection[] {
     sections.push({
       items: [{ label: 'Assigned to me', href: '/dashboard/assigned', badgeKey: 'assigned_open' }],
     });
-    sections.push({
-      heading: 'Personal',
-      items: [
-        { label: 'My requests', href: '/dashboard/tickets' },
-        { label: 'Availability', href: '/dashboard/availability' },
-      ],
-    });
+    sections.push(personalSection(user));
     return sections;
   }
 
+  // Requester: no team, no elevated role.
   sections.push({
     items: [
       { label: 'My tickets', href: '/dashboard/tickets', badgeKey: 'open' },
