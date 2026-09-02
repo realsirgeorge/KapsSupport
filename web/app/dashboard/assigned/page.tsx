@@ -192,7 +192,7 @@ export default function AssignedToMePage() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs text-primary">{ticket.ticket_number}</span>
+                        <span className="whitespace-nowrap font-mono text-xs text-primary">{ticket.ticket_number}</span>
                         {ticket.category_name && <Badge variant="outline">{ticket.category_name}</Badge>}
                         <PriorityBadge priority={ticket.confirmed_priority ?? ticket.suggested_priority} />
                       </div>

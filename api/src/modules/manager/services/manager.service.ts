@@ -190,23 +190,29 @@ export class ManagerService {
   ): Promise<{ data: Ticket[]; total: number; page: number; limit: number }> {
     await this.validateTeamAccess(teamId, user);
 
-    let query = `
-      SELECT t.*, au.name as assignee_name
+    // The row query and the count query share everything from FROM onwards and
+    // differ only in their select list. Building the count by string-replacing
+    // 'SELECT t.*' in the finished query — as this did — silently breaks the
+    // moment another column joins the select list: adding `au.name` left it
+    // dangling after COUNT(*), and Postgres rejected the whole request with
+    // "au.name must appear in the GROUP BY clause". Keeping the shared part
+    // as its own fragment means the two can't drift apart again.
+    const params_array: any[] = [teamId];
+    let fromWhere = `
       FROM tickets t
       JOIN categories c ON t.confirmed_category_id = c.id
       LEFT JOIN users au ON t.assigned_to = au.id
       WHERE c.team_id = $1
     `;
-    const params_array: any[] = [teamId];
 
     if (params?.status) {
-      query += ` AND t.status = $${params_array.length + 1}`;
       params_array.push(params.status);
+      fromWhere += ` AND t.status = $${params_array.length}`;
     }
 
     if (params?.assigned_to) {
-      query += ` AND t.assigned_to = $${params_array.length + 1}`;
       params_array.push(params.assigned_to);
+      fromWhere += ` AND t.assigned_to = $${params_array.length}`;
     }
 
     // Pagination
@@ -214,16 +220,18 @@ export class ManagerService {
     const limit = Math.min(params?.limit || 25, 100);
     const skip = (page - 1) * limit;
 
-    // Get total
-    const countQuery = query.replace('SELECT t.*', 'SELECT COUNT(*)::INTEGER as count');
-    const countResult = await this.dataSource.query(countQuery, params_array);
+    const countResult = await this.dataSource.query(
+      `SELECT COUNT(*)::INTEGER as count ${fromWhere}`,
+      params_array,
+    );
     const total = countResult[0]?.count || 0;
 
-    // Get paginated results
-    query += ` ORDER BY t.created_at DESC LIMIT $${params_array.length + 1} OFFSET $${params_array.length + 2}`;
-    params_array.push(limit, skip);
-
-    const data = await this.dataSource.query(query, params_array);
+    const data = await this.dataSource.query(
+      `SELECT t.*, au.name as assignee_name ${fromWhere}
+       ORDER BY t.created_at DESC
+       LIMIT $${params_array.length + 1} OFFSET $${params_array.length + 2}`,
+      [...params_array, limit, skip],
+    );
 
     return { data, total, page, limit };
   }

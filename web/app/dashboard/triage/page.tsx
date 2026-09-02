@@ -176,7 +176,7 @@ function QueueCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">
-            <span className="font-mono text-primary">{ticket.ticket_number}</span>
+            <span className="whitespace-nowrap font-mono text-primary">{ticket.ticket_number}</span>
             <span className="mx-1.5">·</span>
             {relativeTime(ticket.created_at)}
             <span className="mx-1.5">·</span>

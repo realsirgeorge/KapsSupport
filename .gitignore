@@ -9,3 +9,6 @@ build/
 .next/
 *.log
 .superpowers/
+
+# TypeScript incremental build cache — regenerated on every build
+*.tsbuildinfo

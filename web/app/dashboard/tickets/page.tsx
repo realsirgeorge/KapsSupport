@@ -122,7 +122,7 @@ export default function TicketsPage() {
         width: 'w-32',
         // The whole row is the link (DataTable `href`), so this stays plain
         // text — a nested anchor would double-navigate.
-        cell: (t) => <span className="font-mono text-sm font-medium text-primary">{t.ticket_number}</span>,
+        cell: (t) => <span className="whitespace-nowrap font-mono text-sm font-medium text-primary">{t.ticket_number}</span>,
       },
       {
         key: 'subject',

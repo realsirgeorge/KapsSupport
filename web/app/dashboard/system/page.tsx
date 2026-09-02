@@ -142,8 +142,10 @@ export default function SystemDashboardPage() {
     {
       key: 'ticket',
       header: 'Ticket',
-      width: 'w-32',
-      cell: (r) => <span className="font-mono text-xs text-muted-foreground">{r.ticket_number}</span>,
+      width: 'w-36',
+      cell: (r) => (
+        <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{r.ticket_number}</span>
+      ),
     },
     {
       key: 'subject',
