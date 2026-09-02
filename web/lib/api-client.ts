@@ -26,6 +26,7 @@ export interface Ticket {
   suggested_category_id?: string;
   confirmed_category_id?: string;
   category_name?: string;
+  suggested_priority?: 'low' | 'medium' | 'high' | 'urgent';
   confirmed_priority?: 'low' | 'medium' | 'high' | 'urgent';
   pending_reason?: string;
   pending_confirmation_days?: number;
@@ -108,6 +109,7 @@ export const ticketApi = {
   confirmResolution: (id: string, action: 'confirm' | 'dispute', comment?: string) =>
     apiClient.post(`/tickets/${id}/confirm-resolution`, { action, comment }),
   recentActivity: (limit?: number) => apiClient.get('/tickets/activity', { params: limit ? { limit } : undefined }),
+  history: (id: string) => apiClient.get(`/tickets/${id}/history`),
 };
 
 // Triage endpoints
@@ -129,6 +131,8 @@ export const teamApi = {
     apiClient.get(`/teams/${teamId}/tickets`, { params }),
   reassign: (ticketId: string, assigneeId: string) =>
     apiClient.post(`/tickets/${ticketId}/reassign`, { assignee_id: assigneeId }),
+  returnToTriage: (ticketId: string, reason?: string) =>
+    apiClient.post(`/tickets/${ticketId}/return-to-triage`, { reason }),
 };
 
 // Dashboard endpoints
@@ -176,7 +180,10 @@ export const adminApi = {
   },
   users: {
     list: () => apiClient.get('/users'),
-    updateRoles: (id: string, data: Partial<{ is_admin: boolean; is_support_triage: boolean; is_executive: boolean }>) =>
+    updateRoles: (
+      id: string,
+      data: Partial<{ is_admin: boolean; is_support_triage: boolean; is_executive: boolean; team_id: string | null }>,
+    ) =>
       apiClient.patch(`/users/${id}/roles`, data),
   },
   ticketSite: {

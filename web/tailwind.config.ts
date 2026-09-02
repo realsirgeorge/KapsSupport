@@ -46,6 +46,18 @@ const config: Config = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        surface: {
+          raised: 'hsl(var(--surface-raised))',
+          sunken: 'hsl(var(--surface-sunken))',
+        },
+        'border-subtle': 'hsl(var(--border-subtle))',
+        'border-strong': 'hsl(var(--border-strong))',
+        priority: {
+          low: 'hsl(var(--priority-low))',
+          medium: 'hsl(var(--priority-medium))',
+          high: 'hsl(var(--priority-high))',
+          urgent: 'hsl(var(--priority-urgent))',
+        },
         status: {
           blue: 'hsl(var(--status-blue))',
           amber: 'hsl(var(--status-amber))',
@@ -62,6 +74,8 @@ const config: Config = {
       },
       boxShadow: {
         card: '0 1px 2px 0 rgb(0 0 0 / 0.4)',
+        raised: '0 4px 16px -4px rgb(0 0 0 / 0.55), 0 1px 2px 0 rgb(0 0 0 / 0.4)',
+        overlay: '0 16px 48px -12px rgb(0 0 0 / 0.75)',
         glow: '0 0 24px -4px hsl(var(--primary) / 0.35)',
       },
       keyframes: {
