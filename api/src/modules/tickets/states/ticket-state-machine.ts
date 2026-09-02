@@ -9,6 +9,30 @@ export enum TicketStatus {
   REOPENED = 'reopened',
 }
 
+/**
+ * The statuses that count as "still open" — i.e. still somebody's work.
+ *
+ * `resolved` belongs here: the ticket is waiting on the requester to confirm,
+ * so it can still come back as `reopened`. Only `pending_confirmation` and
+ * `closed` are out.
+ *
+ * This lives beside the state machine because it is a statement about the
+ * state machine, and because every dashboard that counts "open tickets" has to
+ * agree on it. They did not: the manager's team stats hard-coded a narrower
+ * three-status list, so a manager saw 7 open tickets on the page while the
+ * sidebar badge for that same team said 9. Two numbers for one question is
+ * worse than either number being wrong, because there is no way to tell which
+ * one to trust.
+ */
+export const OPEN_STATUSES: readonly string[] = [
+  TicketStatus.NEW,
+  TicketStatus.ASSIGNED,
+  TicketStatus.IN_PROGRESS,
+  TicketStatus.PENDING,
+  TicketStatus.RESOLVED,
+  TicketStatus.REOPENED,
+];
+
 export interface StateTransition {
   from: TicketStatus;
   to: TicketStatus;

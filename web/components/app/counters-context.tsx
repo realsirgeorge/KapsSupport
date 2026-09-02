@@ -15,6 +15,7 @@ export interface Counters {
   awaiting_assignment?: number;
   assigned_today?: number;
   team_open?: number;
+  team_aging_over_3_days?: number;
   my_requests_open?: number;
   total_open?: number;
   aging_over_3_days?: number;

@@ -153,7 +153,10 @@ export function navBadgeValue(item: NavItem, counters: Counters | null): number 
 export function needsAttentionCount(user: CurrentUser, counters: Counters | null): number | null {
   if (!counters) return null;
   if (user.is_admin || user.is_executive) return counters.aging_over_3_days ?? null;
-  if (user.manages_team_id) return null;
+  // A manager's badge counts their team's aging tickets, not `team_open` —
+  // total open work is a number that is never zero, so it would leave the bell
+  // permanently lit and mean nothing.
+  if (user.manages_team_id) return counters.team_aging_over_3_days ?? null;
   if (user.is_support_triage) {
     const awaiting = (counters.awaiting_category ?? 0) + (counters.awaiting_assignment ?? 0);
     return awaiting > 0 ? awaiting : null;

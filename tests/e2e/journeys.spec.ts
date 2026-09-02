@@ -116,8 +116,13 @@ test.describe('Manager (FR-3.x)', () => {
     await login(page, USERS.manager);
     await page.goto('/dashboard/availability');
     await expect(page.getByRole('heading', { name: /availability/i })).toBeVisible();
-    // The seed leaves pending requests for this manager's team.
-    await expect(page.getByText(/pending approvals/i)).toBeVisible();
+    // The approval queue is the manager-only half of this page — a plain
+    // requester sees "My requests" and nothing else. Assert on the section's
+    // real heading rather than a paraphrase.
+    // Scoped to headings: "My requests" is also a sidebar link on this page,
+    // and an unscoped text match resolves to both.
+    await expect(page.getByRole('heading', { name: /waiting on your approval/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /my requests/i })).toBeVisible();
   });
 });
 

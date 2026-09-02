@@ -29,6 +29,19 @@ export function isAging(createdAt: string | Date, thresholdDays = 3): boolean {
   return days > thresholdDays;
 }
 
+/**
+ * "1 Sep" — the first day of the current calendar month.
+ *
+ * The system dashboard's month-to-date counter is windowed on
+ * `date_trunc('month', now())`, which means on the 2nd of a month a near-zero
+ * count is the honest answer rather than a broken query. Naming the window
+ * beside the number is what makes the difference legible.
+ */
+export function monthStartLabel(now: Date = new Date()): string {
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
 const OPEN_STATUSES = new Set(['new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened']);
 
 export function isOpenStatus(status: string): boolean {

@@ -293,25 +293,12 @@ export class TriageService {
     return { data: members };
   }
 
-  /**
-   * Get per-member workload for a team
-   */
-  async getTeamWorkload(teamId: string, user: User) {
-    if (!user.is_support_triage && !user.is_admin) {
-      throw new ForbiddenException('Not authorized');
-    }
-
-    const query = `
-      SELECT u.id, u.name, u.email,
-             COUNT(CASE WHEN t.status IN ('assigned', 'in_progress') THEN 1 END) as open_tickets
-      FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_to
-      WHERE u.team_id = $1 AND u.active = true
-      GROUP BY u.id, u.name, u.email
-      ORDER BY u.name ASC
-    `;
-
-    const workload = await this.dataSource.query(query, [teamId]);
-    return { data: workload };
-  }
+  // A second `getTeamWorkload` lived here, unreachable: no controller routed to
+  // it and nothing called it. GET /v1/teams/:id/workload — the endpoint the
+  // triage queue actually uses to pick an assignee — is served by
+  // ManagerService. This copy counted only ('assigned', 'in_progress') and
+  // omitted `is_unavailable` entirely, so had anything ever wired up to it,
+  // triage would have shown different workload numbers than the manager's own
+  // dashboard and offered unavailable members as assignees (FR-10.5). Removed
+  // rather than fixed: one definition of team workload, in one place.
 }

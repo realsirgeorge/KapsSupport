@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { getManagesTeamId } from '../../../database/team-management';
+import { OPEN_STATUSES } from '../../tickets/states/ticket-state-machine';
 
 export interface User {
   id: string;
@@ -9,12 +10,6 @@ export interface User {
   is_executive: boolean;
   is_support_triage: boolean;
 }
-
-/**
- * Open statuses: 'new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened'
- * (excludes 'pending_confirmation' and 'closed' since they're terminal states)
- */
-const OPEN_STATUSES = ['new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened'];
 
 @Injectable()
 export class DashboardService {
@@ -158,13 +153,26 @@ export class DashboardService {
     // Manager (must check this before Team Member)
     const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (managerTeamId) {
-      const [team_open, my_requests_open] = await Promise.all([
+      const [team_open, team_aging_over_3_days, my_requests_open] = await Promise.all([
         // Tickets in this manager's team
         this.dataSource
           .query(
             `SELECT COUNT(*) as count FROM tickets tk
            JOIN categories c ON tk.confirmed_category_id = c.id
            WHERE c.team_id = $1 AND tk.status = ANY($2::text[])`,
+            [managerTeamId, OPEN_STATUSES],
+          )
+          .then((r) => parseInt(r[0].count || '0', 10)),
+        // Of those, the ones that have been open more than 3 days. This is what
+        // feeds the manager's attention badge: `team_open` alone is a workload
+        // number that is never zero and so never means "look at this", whereas
+        // the aging subset is the same thing every other role's badge counts.
+        this.dataSource
+          .query(
+            `SELECT COUNT(*) as count FROM tickets tk
+           JOIN categories c ON tk.confirmed_category_id = c.id
+           WHERE c.team_id = $1 AND tk.status = ANY($2::text[])
+             AND (now() - tk.created_at) > INTERVAL '3 days'`,
             [managerTeamId, OPEN_STATUSES],
           )
           .then((r) => parseInt(r[0].count || '0', 10)),
@@ -177,7 +185,7 @@ export class DashboardService {
           .then((r) => parseInt(r[0].count || '0', 10)),
       ]);
 
-      return { team_open, my_requests_open };
+      return { team_open, team_aging_over_3_days, my_requests_open };
     }
 
     // Team Member (has team_id)

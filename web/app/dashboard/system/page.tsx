@@ -15,6 +15,7 @@ import { PageSkeleton } from '@/components/ui/skeleton';
 import { WorkloadBar } from '@/components/app/workload-bar';
 import { ActivityFeed } from '@/components/app/activity-feed';
 import type { ActivityEntry } from '@/lib/activity';
+import { monthStartLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 interface SystemData {
@@ -192,10 +193,29 @@ export default function SystemDashboardPage() {
         <p className="mt-1 text-sm text-muted-foreground">All teams, all sites — full visibility{user.is_executive ? ', no editing for executive role' : ''}</p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total open tickets" value={data.total_open} icon={Inbox} primary />
-        <StatCard label="Aging (>3 days)" value={data.aging_over_3_days} icon={AlertTriangle} />
-        <StatCard label="Resolved this month" value={data.resolved_this_month} icon={CheckCircle2} />
+        <StatCard
+          label="Aging (>3 days)"
+          value={data.aging_over_3_days}
+          icon={AlertTriangle}
+          hint={data.aging_over_3_days > 0 ? 'Needs attention' : undefined}
+          hintTone={data.aging_over_3_days > 0 ? 'amber' : 'default'}
+        />
+        {/*
+          This counts tickets whose status is `closed`, not `resolved` — and in
+          this system those are two different things: a resolved ticket is still
+          waiting on the requester to confirm. Labelling it "Resolved" made the
+          card contradict the status vocabulary used everywhere else on the page.
+          The window is the calendar month, so early in a month a low number is
+          the truth rather than a broken metric; the hint says so.
+        */}
+        <StatCard
+          label="Closed this month"
+          value={data.resolved_this_month}
+          icon={CheckCircle2}
+          hint={`Since ${monthStartLabel()}`}
+        />
         <StatCard label="Avg resolution time" value={`${data.avg_resolution_hours.toFixed(1)}h`} icon={Clock} />
       </div>
 

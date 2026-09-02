@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { withActor } from '../../../database/with-actor';
 import { getManagesTeamId } from '../../../database/team-management';
+import { OPEN_STATUSES } from '../../tickets/states/ticket-state-machine';
 
 export interface User {
   id: string;
@@ -52,21 +53,16 @@ export class ManagerService {
   async getTeamWorkload(teamId: string, user: User): Promise<{ data: TeamMember[] }> {
     await this.validateWorkloadAccess(teamId, user);
 
-    // Query: SELECT u.id, u.name, u.email, u.is_unavailable, COUNT(t.id) as open_tickets
-    // FROM users u
-    // LEFT JOIN tickets t ON u.id = t.assigned_to AND t.status IN ('assigned', 'in_progress', 'pending')
-    // WHERE u.team_id = $1
-    // GROUP BY u.id, u.name, u.email, u.is_unavailable
     const members = await this.dataSource.query(
       `
       SELECT u.id, u.name, u.email, u.is_unavailable, COUNT(t.id)::INTEGER as open_tickets
       FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_to AND t.status IN ('assigned', 'in_progress', 'pending')
+      LEFT JOIN tickets t ON u.id = t.assigned_to AND t.status = ANY($2::text[])
       WHERE u.team_id = $1
       GROUP BY u.id, u.name, u.email, u.is_unavailable
       ORDER BY u.name ASC
       `,
-      [teamId],
+      [teamId, OPEN_STATUSES],
     );
 
     return { data: members };
@@ -90,15 +86,20 @@ export class ManagerService {
   }> {
     await this.validateTeamAccess(teamId, user);
 
-    // Get open tickets count
+    // Every "open tickets" number in the product has to answer the same
+    // question the same way, so all of these window on the shared
+    // OPEN_STATUSES rather than an inline list. These three queries used to
+    // hard-code ('assigned', 'in_progress', 'pending'), which silently dropped
+    // `new`, `resolved` and `reopened` — a manager's page said 7 open while
+    // the sidebar badge for the same team, built from the shared list, said 9.
     const openResult = await this.dataSource.query(
       `
       SELECT COUNT(*)::INTEGER as count
       FROM tickets t
       JOIN categories c ON t.confirmed_category_id = c.id
-      WHERE c.team_id = $1 AND t.status IN ('assigned', 'in_progress', 'pending')
+      WHERE c.team_id = $1 AND t.status = ANY($2::text[])
       `,
-      [teamId],
+      [teamId, OPEN_STATUSES],
     );
 
     const open_tickets = openResult[0]?.count || 0;
@@ -109,10 +110,10 @@ export class ManagerService {
       SELECT COUNT(*)::INTEGER as count
       FROM tickets t
       JOIN categories c ON t.confirmed_category_id = c.id
-      WHERE c.team_id = $1 AND t.status IN ('assigned', 'in_progress', 'pending')
+      WHERE c.team_id = $1 AND t.status = ANY($2::text[])
       AND (NOW() - t.created_at) > INTERVAL '3 days'
       `,
-      [teamId],
+      [teamId, OPEN_STATUSES],
     );
 
     const aging_over_3_days = agingResult[0]?.count || 0;
@@ -138,13 +139,17 @@ export class ManagerService {
 
     const team_size = teamSizeResult[0]?.count || 0;
 
-    // Get per-member stats
+    // Get per-member stats. The open count needs FILTER rather than a join
+    // predicate because the same joined rows also feed avg_resolution_hours,
+    // which is about closed tickets — narrowing the join would empty it.
+    // Before this it was a bare COUNT(t.id), i.e. every ticket the member had
+    // ever been assigned, closed ones included, labelled "open".
     const perMemberResult = await this.dataSource.query(
       `
       SELECT
         u.id as user_id,
         u.name,
-        COUNT(t.id)::INTEGER as open_tickets,
+        COUNT(t.id) FILTER (WHERE t.status = ANY($2::text[]))::INTEGER as open_tickets,
         COALESCE(AVG(EXTRACT(EPOCH FROM (t.closed_at - t.created_at)) / 3600)::NUMERIC, 0) as avg_resolution_hours
       FROM users u
       LEFT JOIN tickets t ON u.id = t.assigned_to
@@ -153,7 +158,7 @@ export class ManagerService {
       GROUP BY u.id, u.name
       ORDER BY u.name ASC
       `,
-      [teamId],
+      [teamId, OPEN_STATUSES],
     );
 
     const per_member = perMemberResult.map((m: any) => ({
