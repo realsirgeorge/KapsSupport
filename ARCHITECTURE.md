@@ -92,6 +92,8 @@ A user can technically satisfy more than one condition (e.g. the seeded Manager 
 
 "Aging" is not a stored status — it's a derived display state (open ticket, `created_at` more than 3 days ago), computed both server-side (`aging_over_3_days` counters) and client-side (`StatusBadge` component, `lib/format.ts#isAging`).
 
+**Counting "open" tickets.** `OPEN_STATUSES`, exported from the same file, is the single definition every count windows on: `new`, `assigned`, `in_progress`, `pending`, `resolved`, `reopened`. `resolved` is in the list because the ticket is waiting on the requester and can still come back as `reopened`; only `pending_confirmation` and `closed` are out. Import it — never inline the list. Four divergent copies had grown across the services (one of them counting closed tickets as open), which put contradictory numbers for the same team on the same screen: the sidebar badge said 9 and the card it linked to said 7. The frontend mirror is `lib/format.ts#isOpenStatus` and must stay in step with it.
+
 ## Frontend structure
 
 ```
@@ -141,4 +143,5 @@ Notable constraints/triggers (`1693526400001-AddTriggersAndConstraints.ts`):
 
 - **Search**: `tickets.search_vector` (tsvector) exists and is populated; nothing queries it. The visible search box is client-side substring filtering only.
 - **`teams`/`users` NestJS modules**: empty scaffolding, superseded by `manager`/`admin`. Not wired to anything; safe to delete once confirmed unused.
+- **FR-9.2 notifications**: not built. There is no notifications module, table, or delivery channel anywhere in the API — nothing to wire a UI to. What exists instead is the header bell, which is a live count of what needs your attention (`nav-config.ts#needsAttentionCount`, fed by `/v1/me/counters`) linking to the screen that holds it, not a notification inbox. Deliberately left unbuilt rather than mocked: a bell that opened an empty or fake list would read as implemented.
 - **JWT staleness**: role/availability fields in the JWT (`is_unavailable`, role booleans, `manages_team_id`) are a snapshot from login time. If another user's action changes them mid-session (e.g. a manager approves your leave while you're logged in), your own UI won't reflect it until you log out and back in. Not fixed in this pass — would need either short-lived tokens with refresh, or a live `/me` re-fetch on relevant actions.
