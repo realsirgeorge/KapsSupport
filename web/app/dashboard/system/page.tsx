@@ -46,7 +46,7 @@ const STATUS_LABELS: Record<string, string> = {
   resolved: 'Resolved',
   pending_confirmation: 'Pending confirmation',
   reopened: 'Reopened',
-  closed: 'Closed (30d)',
+  closed: 'Closed',
 };
 
 const STATUS_DOT: Record<string, string> = {
@@ -221,6 +221,7 @@ export default function SystemDashboardPage() {
 
       <Section
         title="Waiting on requester confirmation"
+        subtitle="Visibility only — nothing here closes on its own, and the system takes no action on this list."
         bare
         bodyClassName="space-y-3"
         action={
@@ -231,9 +232,6 @@ export default function SystemDashboardPage() {
           ) : undefined
         }
       >
-        <p className="text-sm text-muted-foreground">
-          Visibility only — nothing here closes on its own, and the system takes no action on this list.
-        </p>
         <DataTable
           columns={pendingColumns}
           rows={pending}
@@ -270,7 +268,7 @@ export default function SystemDashboardPage() {
         </Section>
       </div>
 
-      <Section title="Tickets by status" bare>
+      <Section title="Tickets by status" bare subtitle="Where every ticket in the system is sitting right now">
         {data.by_status.length === 0 ? (
           <EmptyState
             icon={HelpCircle}
@@ -279,11 +277,17 @@ export default function SystemDashboardPage() {
             description="Status totals appear once tickets are raised."
           />
         ) : (
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
             {data.by_status.map((s) => (
               <div key={s.status} className="rounded-lg border border-border bg-card p-4 shadow-card">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className={`h-2 w-2 rounded-full ${STATUS_DOT[s.status] ?? 'bg-status-gray'}`} aria-hidden="true" />
+                {/* items-start, not items-center: "Pending confirmation" wraps
+                    to two lines and a vertically-centred dot then floats
+                    between them instead of marking the label. */}
+                <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <span
+                    className={`mt-[0.4rem] h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[s.status] ?? 'bg-status-gray'}`}
+                    aria-hidden="true"
+                  />
                   {STATUS_LABELS[s.status] ?? s.status}
                 </div>
                 <p className="mt-2 text-2xl font-bold tabular text-foreground">{s.count}</p>

@@ -87,27 +87,24 @@ export class DashboardService {
         count: parseInt(row.count || '0', 10),
       }));
 
-    // By status: open statuses as-is, plus pending_confirmation, plus closed in the last 30 days
+    // How many tickets are sitting in each status right now — one row per
+    // status, counting every ticket, no windowing. It used to splice in a
+    // separately-queried `closed` count limited to the last 30 days, disclosed
+    // only by the frontend labelling that one tile "Closed (30d)". Seven
+    // all-time counts and one 30-day count in the same row is a comparison the
+    // reader can't make; keeping the closed tile small is a presentation
+    // concern and doesn't belong in the query.
     const byStatusResult = await this.dataSource.query(
-      `SELECT status, COUNT(*) as count
+      `SELECT status, COUNT(*)::INTEGER as count
       FROM tickets
-      WHERE status = ANY($1::text[]) OR status = 'pending_confirmation'
       GROUP BY status
       ORDER BY status`,
-      [OPEN_STATUSES],
     );
 
-    const closedLast30Result = await this.dataSource.query(
-      `SELECT COUNT(*) as count FROM tickets WHERE status = 'closed' AND closed_at >= now() - INTERVAL '30 days'`,
-    );
-
-    const by_status = [
-      ...byStatusResult.map((row) => ({
-        status: row.status,
-        count: parseInt(row.count || '0', 10),
-      })),
-      { status: 'closed', count: parseInt(closedLast30Result[0].count || '0', 10) },
-    ];
+    const by_status = byStatusResult.map((row) => ({
+      status: row.status,
+      count: row.count,
+    }));
 
     return { total_open, aging_over_3_days, resolved_this_month, avg_resolution_hours, by_team, by_status };
   }

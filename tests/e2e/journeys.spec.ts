@@ -25,7 +25,10 @@ async function login(page: Page, email: string) {
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: /sign in/i }).click();
   // Each role lands on a different home screen, so just assert we left /login.
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 15_000 });
+  // The generous timeout is for a cold dev server: the first hit on each route
+  // compiles it, and the roles-landing test walks five distinct routes in a
+  // row. 15s was enough against a warm server and flaked against a fresh one.
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
 }
 
 test.describe('Authentication', () => {
@@ -151,8 +154,23 @@ test.describe('Admin (FR-5.x, 6.x)', () => {
     await login(page, USERS.admin);
     await page.goto('/dashboard/admin/users');
     await page.getByRole('button', { name: /edit/i }).first().click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('dialog').getByText(/team/i).first()).toBeVisible();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // FR-5.2 is about *assigning* a team, so assert the control is a real,
+    // populated select rather than that the word "Team" appears somewhere.
+    const teamSelect = dialog.getByRole('combobox');
+    await expect(teamSelect).toBeVisible();
+    await teamSelect.click();
+    await expect(page.getByRole('option', { name: /no team/i })).toBeVisible();
+    // At least one actual team beyond the "No team" sentinel.
+    expect(await page.getByRole('option').count()).toBeGreaterThan(1);
+
+    // Deliberately read-only. This suite runs against the shared seeded
+    // database on knight-labs; a test that saved here would rewrite a real
+    // user's team on every run and drift the very counts other tests assert.
+    await page.keyboard.press('Escape');
   });
 });
 
