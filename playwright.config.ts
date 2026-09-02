@@ -1,29 +1,29 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * Targets the already-running dev servers (web on :3000, API on :3001)
+ * against the remote database on knight-labs.
+ *
+ * There is deliberately no `webServer` block. It previously ran
+ * `docker compose up`, which stands the whole stack up locally including
+ * Postgres and Redis — this machine is memory-constrained and its database
+ * lives on a separate host, so that would both fail and fight the real
+ * environment. Start the servers yourself before running these:
+ *
+ *   cd api && node dist/main.js &
+ *   cd web && npm run dev &
+ */
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: true,
+  fullyParallel: false, // these tests share one database; serial keeps state legible
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  retries: 0,
+  workers: 1,
+  reporter: [['list']],
   use: {
-    baseURL: 'http://localhost',
-    trace: 'on-first-retry',
+    baseURL: process.env.E2E_BASE_URL || 'http://localhost:3000',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-  ],
-
-  webServer: {
-    command: 'cd infra && docker compose up',
-    url: 'http://localhost',
-    reuseExistingServer: !process.env.CI,
-    timeout: 180 * 1000,
-  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });
