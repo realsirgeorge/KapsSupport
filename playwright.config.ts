@@ -27,6 +27,9 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests/e2e',
+  // Compiles every route before the first test — see the file for why.
+  globalSetup: './tests/e2e/global-setup.ts',
+  testIgnore: ['**/global-setup.ts'],
   fullyParallel: false, // these tests share one database; serial keeps state legible
   forbidOnly: !!process.env.CI,
   retries: 0,
