@@ -68,6 +68,19 @@ const SUBJECTS = [
   'Badge reader not registering swipes',
 ];
 
+/**
+ * A later moment measured forward from an earlier one.
+ *
+ * Resolution and closure timestamps must be derived from the ticket's own
+ * created_at, never picked independently: doing the latter produced tickets
+ * closed *before* they were created, which dragged the dashboards'
+ * AVG(closed_at - created_at) to a negative "avg resolution time".
+ * The tickets table now rejects that ordering outright.
+ */
+function hoursAfter(base: Date, hours: number): Date {
+  return new Date(base.getTime() + hours * 60 * 60 * 1000);
+}
+
 function daysAgo(n: number): Date {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -408,7 +421,7 @@ async function seed() {
       assigned_at: created,
       status: 'resolved',
       created_at: created,
-      resolved_at: hoursAgo(pick([1, 4, 8])),
+      resolved_at: hoursAfter(created, pick([2, 9, 20])),
     });
     ticketCount++;
   }
@@ -418,7 +431,8 @@ async function seed() {
   for (let i = 0; i < 4; i++) {
     const { categoryId, memberId } = randomTeamContext();
     const created = daysAgo(pick([3, 6, 10]));
-    const resolvedAt = i === 0 ? daysAgo(9) : hoursAgo(pick([6, 20, 48]));
+    // Resolved somewhere between 2h after creation and now — always after it.
+    const resolvedAt = hoursAfter(created, pick([2, 8, 26, 50]));
     await insertTicket({
       requester_id: pick(requesterIds),
       site_id: pick(siteIds),
@@ -443,7 +457,7 @@ async function seed() {
   for (let i = 0; i < 4; i++) {
     const { categoryId, memberId } = randomTeamContext();
     const created = daysAgo(pick([10, 20, 40]));
-    const resolvedAt = i < 2 ? daysAgo(pick([1, 3])) : daysAgo(pick([35, 45]));
+    const resolvedAt = hoursAfter(created, pick([3, 12, 40, 90]));
     await insertTicket({
       requester_id: pick(requesterIds),
       site_id: pick(siteIds),
@@ -459,7 +473,7 @@ async function seed() {
       created_at: created,
       resolved_at: resolvedAt,
       pending_confirmation_at: resolvedAt,
-      closed_at: resolvedAt,
+      closed_at: hoursAfter(resolvedAt, pick([1, 6, 24])),
     });
     ticketCount++;
   }
@@ -481,7 +495,7 @@ async function seed() {
       assigned_at: created,
       status: 'reopened',
       created_at: created,
-      resolved_at: daysAgo(pick([2, 3])),
+      resolved_at: hoursAfter(created, pick([5, 18])),
     });
     ticketCount++;
   }
