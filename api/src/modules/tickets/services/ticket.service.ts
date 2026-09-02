@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { TicketStateMachine, TicketStatus } from '../states/ticket-state-machine';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { withActor } from '../../../database/with-actor';
+import { getManagesTeamId } from '../../../database/team-management';
 
 export interface User {
   id: string;
@@ -49,11 +50,6 @@ export class TicketService {
     this.stateMachine = new TicketStateMachine();
   }
 
-  /** team_id means team membership, not management — see with-actor.ts / manager.service.ts for the same fix elsewhere. */
-  private async getManagesTeamId(userId: string): Promise<string | null> {
-    const [team] = await this.dataSource.query('SELECT id FROM teams WHERE manager_id = $1 LIMIT 1', [userId]);
-    return team ? team.id : null;
-  }
 
   /**
    * Shared authorization module: scope tickets by user's role and team/site.
@@ -72,7 +68,7 @@ export class TicketService {
       return { conditions: [], params: [] };
     }
 
-    const managesTeamId = await this.getManagesTeamId(user.id);
+    const managesTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (managesTeamId) {
       // Manager: own created + entire team's tickets regardless of holder (FR-3.4/3.6)
       return {
@@ -380,6 +376,57 @@ export class TicketService {
        ORDER BY h.created_at DESC
        LIMIT $${params.length + 1}`,
       [...params, limit],
+    );
+  }
+
+  /**
+   * FR-8.2: the full audit trail for one ticket — every status change,
+   * assignment, and reassignment with actor and timestamp. Goes through
+   * getTicket() first so a user can only read the history of a ticket they
+   * were already allowed to see.
+   *
+   * Raw UUIDs in old_value/new_value (assignee, category, site changes) are
+   * resolved to display names here rather than in the UI, so the client
+   * doesn't need a second round-trip to make the trail readable.
+   */
+  async getTicketHistory(ticketId: string, user: User): Promise<any[]> {
+    await this.getTicket(ticketId, user); // throws 404 if not visible to this user
+
+    // old_value/new_value is a free-text column holding either a status
+    // string ('assigned') or a UUID depending on field_changed, so the
+    // ::uuid casts must never see a non-UUID. A regex guard inside a JOIN
+    // condition is not enough — Postgres does not promise to evaluate JOIN
+    // predicates left-to-right, and it did in fact attempt to cast
+    // 'assigned'. CASE *is* documented to short-circuit, and MATERIALIZED
+    // stops the planner from inlining the CTE and reordering around it.
+    return this.dataSource.query(
+      `WITH h AS MATERIALIZED (
+         SELECT id, actor_id, action, field_changed, old_value, new_value, created_at,
+                CASE WHEN old_value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                     THEN old_value::uuid END AS old_uuid,
+                CASE WHEN new_value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                     THEN new_value::uuid END AS new_uuid
+         FROM ticket_history
+         WHERE ticket_id = $1
+       )
+       SELECT h.id, h.action, h.field_changed, h.old_value, h.new_value, h.created_at,
+              a.name  AS actor_name,
+              ov.name AS old_value_name,
+              nv.name AS new_value_name,
+              oc.name AS old_category_name,
+              nc.name AS new_category_name,
+              os.name AS old_site_name,
+              ns.name AS new_site_name
+       FROM h
+       LEFT JOIN users a       ON a.id  = h.actor_id
+       LEFT JOIN users ov      ON h.field_changed = 'assigned_to'           AND ov.id = h.old_uuid
+       LEFT JOIN users nv      ON h.field_changed = 'assigned_to'           AND nv.id = h.new_uuid
+       LEFT JOIN categories oc ON h.field_changed = 'confirmed_category_id' AND oc.id = h.old_uuid
+       LEFT JOIN categories nc ON h.field_changed = 'confirmed_category_id' AND nc.id = h.new_uuid
+       LEFT JOIN sites os      ON h.field_changed = 'site_id'               AND os.id = h.old_uuid
+       LEFT JOIN sites ns      ON h.field_changed = 'site_id'               AND ns.id = h.new_uuid
+       ORDER BY h.created_at ASC`,
+      [ticketId],
     );
   }
 }

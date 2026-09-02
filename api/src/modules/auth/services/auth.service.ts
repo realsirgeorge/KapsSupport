@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { getManagesTeamId } from '../../../database/team-management';
 
 @Injectable()
 export class AuthService {
@@ -29,7 +30,7 @@ export class AuthService {
   }
 
   async login(user: any) {
-    const managesTeamId = await this.getManagesTeamId(user.id);
+    const managesTeamId = await getManagesTeamId(this.dataSource, user.id);
 
     const payload = {
       sub: user.id,
@@ -59,17 +60,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * A user's "manages_team_id" is not a stored column — it's derived from
-   * teams.manager_id, same lookup DashboardService/ManagerService use.
-   */
-  private async getManagesTeamId(userId: string): Promise<string | null> {
-    const [team] = await this.dataSource.query(
-      'SELECT id FROM teams WHERE manager_id = $1 LIMIT 1',
-      [userId],
-    );
-    return team ? team.id : null;
-  }
 
   async logout(user: any) {
     return { message: 'Logout successful' };

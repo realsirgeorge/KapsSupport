@@ -62,6 +62,15 @@ export class TicketsController {
   }
 
   /**
+   * GET /v1/tickets/:id/history - Full audit trail for one ticket (FR-8.2)
+   */
+  @Get(':id/history')
+  async getHistory(@Param('id') id: string, @Request() req) {
+    const data = await this.ticketService.getTicketHistory(id, req.user);
+    return { data };
+  }
+
+  /**
    * GET /v1/tickets/:id - Get single ticket
    */
   @Get(':id')

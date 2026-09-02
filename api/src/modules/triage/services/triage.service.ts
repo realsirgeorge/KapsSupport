@@ -8,6 +8,7 @@ import {
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { withActor } from '../../../database/with-actor';
+import { getManagesTeamId } from '../../../database/team-management';
 
 export interface User {
   id: string;
@@ -25,11 +26,6 @@ export class TriageService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  /** team_id means team membership, not management — see with-actor.ts / manager.service.ts for the same fix elsewhere. */
-  private async getManagesTeamId(userId: string): Promise<string | null> {
-    const [team] = await this.dataSource.query('SELECT id FROM teams WHERE manager_id = $1 LIMIT 1', [userId]);
-    return team ? team.id : null;
-  }
 
   /**
    * GET /triage/queue - List tickets needing triage
@@ -163,7 +159,7 @@ export class TriageService {
 
     // Check authorization
     const isSupport = user.is_support_triage || user.is_admin;
-    const managesTeamId = isSupport ? null : await this.getManagesTeamId(user.id);
+    const managesTeamId = isSupport ? null : await getManagesTeamId(this.dataSource, user.id);
     const isManager = !!managesTeamId && managesTeamId === ticket.team_id;
 
     if (!isSupport && !isManager) {
@@ -215,7 +211,7 @@ export class TriageService {
 
     // Check authorization
     const isSupport = user.is_support_triage || user.is_admin;
-    const managesTeamId = isSupport ? null : await this.getManagesTeamId(user.id);
+    const managesTeamId = isSupport ? null : await getManagesTeamId(this.dataSource, user.id);
     const isManager = !!managesTeamId && managesTeamId === ticket.team_id;
 
     if (!isSupport && !isManager) {

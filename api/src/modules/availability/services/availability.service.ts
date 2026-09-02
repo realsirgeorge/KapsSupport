@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { getManagesTeamId } from '../../../database/team-management';
 
 /**
  * User interface for authorization checks
@@ -47,17 +48,6 @@ export class AvailabilityService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  /**
-   * A user's "manages" relationship to a team is not a stored column on
-   * users — it's derived from teams.manager_id. team_id on its own only
-   * means "member of this team", not "manages this team"; comparing
-   * team_id === team_id would let any team member approve/reject/view
-   * their teammates' leave requests, not just their manager.
-   */
-  private async getManagesTeamId(userId: string): Promise<string | null> {
-    const [team] = await this.dataSource.query('SELECT id FROM teams WHERE manager_id = $1 LIMIT 1', [userId]);
-    return team ? team.id : null;
-  }
 
   /**
    * POST /availability-requests - Team Member requests leave
@@ -152,7 +142,7 @@ export class AvailabilityService {
     const conditions: string[] = [];
     const params: any[] = [];
 
-    const managesTeamId = await this.getManagesTeamId(user.id);
+    const managesTeamId = await getManagesTeamId(this.dataSource, user.id);
 
     if (user.is_admin || user.is_support_triage) {
       // Admin and Support/Triage see all requests
@@ -215,7 +205,7 @@ export class AvailabilityService {
 
     // Authorization: Only manager of the user's team or admin can approve
     if (!approvingUser.is_admin) {
-      const managesTeamId = await this.getManagesTeamId(approvingUser.id);
+      const managesTeamId = await getManagesTeamId(this.dataSource, approvingUser.id);
       if (!managesTeamId || managesTeamId !== requestingUser.team_id) {
         throw new ForbiddenException('Can only approve requests for your team');
       }
@@ -279,7 +269,7 @@ export class AvailabilityService {
 
     // Authorization: Only manager of the user's team or admin can reject
     if (!rejectingUser.is_admin) {
-      const managesTeamId = await this.getManagesTeamId(rejectingUser.id);
+      const managesTeamId = await getManagesTeamId(this.dataSource, rejectingUser.id);
       if (!managesTeamId || managesTeamId !== requestingUser.team_id) {
         throw new ForbiddenException('Can only reject requests for your team');
       }
@@ -345,7 +335,7 @@ export class AvailabilityService {
     // 3. You are admin
     const isRequester = endingUser.id === request.user_id;
     const isAdmin = endingUser.is_admin;
-    const managesTeamId = isRequester || isAdmin ? null : await this.getManagesTeamId(endingUser.id);
+    const managesTeamId = isRequester || isAdmin ? null : await getManagesTeamId(this.dataSource, endingUser.id);
     const isManagerOfTeam = !!managesTeamId && managesTeamId === requestingUser.team_id;
 
     if (!isRequester && !isManagerOfTeam && !isAdmin) {

@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, BadRequestException, ConflictException,
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { withActor } from '../../../database/with-actor';
+import { getManagesTeamId } from '../../../database/team-management';
 
 // Inline interfaces matching project pattern
 export interface User {
@@ -593,7 +594,12 @@ export class AdminService {
   async updateUserRoles(
     user: User,
     userId: string,
-    data: { is_admin?: boolean; is_support_triage?: boolean; is_executive?: boolean },
+    data: {
+      is_admin?: boolean;
+      is_support_triage?: boolean;
+      is_executive?: boolean;
+      team_id?: string | null;
+    },
   ): Promise<{ data: UserResponse }> {
     this.validateAdmin(user);
 
@@ -610,6 +616,29 @@ export class AdminService {
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;
+
+    // FR-5.2: Admin adds/removes staff from a team's member list. Passing
+    // team_id: null removes them from their team.
+    if (data.team_id !== undefined) {
+      if (data.team_id !== null) {
+        const [team] = await this.dataSource.query('SELECT id FROM teams WHERE id = $1', [data.team_id]);
+        if (!team) {
+          throw new BadRequestException('Team not found');
+        }
+      } else {
+        // Removing someone who manages a team would leave that team headless
+        // (FR-3.7: each team has exactly one Manager), so block it and make
+        // the admin reassign the manager on the Teams page first.
+        const managed = await getManagesTeamId(this.dataSource, userId);
+        if (managed) {
+          throw new ConflictException(
+            'This user manages a team. Assign a different manager on the Teams page before removing them from it.',
+          );
+        }
+      }
+      updates.push(`team_id = $${paramCount++}`);
+      params.push(data.team_id);
+    }
 
     if (data.is_admin !== undefined) {
       updates.push(`is_admin = $${paramCount++}`);

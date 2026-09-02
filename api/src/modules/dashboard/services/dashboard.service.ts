@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { getManagesTeamId } from '../../../database/team-management';
 
 export interface User {
   id: string;
@@ -19,17 +20,6 @@ const OPEN_STATUSES = ['new', 'assigned', 'in_progress', 'pending', 'resolved', 
 export class DashboardService {
   constructor(private dataSource: DataSource) {}
 
-  /**
-   * Helper: Get manager's team ID if user is a manager.
-   * Returns the team ID of a team where user is the manager.
-   */
-  private async getManagerTeamId(userId: string): Promise<string | null> {
-    const result = await this.dataSource.query(
-      'SELECT id FROM teams WHERE manager_id = $1 LIMIT 1',
-      [userId],
-    );
-    return result.length > 0 ? result[0].id : null;
-  }
 
   /**
    * Helper: Compute pending_confirmation_days for a given date.
@@ -166,7 +156,7 @@ export class DashboardService {
     }
 
     // Manager (must check this before Team Member)
-    const managerTeamId = await this.getManagerTeamId(user.id);
+    const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (managerTeamId) {
       const [team_open, my_requests_open] = await Promise.all([
         // Tickets in this manager's team

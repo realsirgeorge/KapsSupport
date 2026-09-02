@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, BadRequestException, NotFoundException,
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { withActor } from '../../../database/with-actor';
+import { getManagesTeamId } from '../../../database/team-management';
 
 export interface User {
   id: string;
@@ -43,18 +44,6 @@ export class ManagerService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  /**
-   * Returns the id of the team this user manages, or null.
-   * A user's "manages_team_id" is not stored on the user/JWT — it is derived
-   * from teams.manager_id, same pattern as DashboardService.
-   */
-  private async getManagerTeamId(userId: string): Promise<string | null> {
-    const [team] = await this.dataSource.query(
-      'SELECT id FROM teams WHERE manager_id = $1 LIMIT 1',
-      [userId],
-    );
-    return team ? team.id : null;
-  }
 
   /**
    * GET /teams/:id/workload - Per-member open ticket count
@@ -245,7 +234,7 @@ export class ManagerService {
    * Response: 403 if trying to reassign outside team, 409 if assignee invalid
    */
   async reassign(ticketId: string, assigneeId: string, user: User): Promise<Ticket> {
-    const managerTeamId = await this.getManagerTeamId(user.id);
+    const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (!managerTeamId && !user.is_admin) {
       throw new ForbiddenException('Only Manager can reassign');
     }
@@ -322,7 +311,7 @@ export class ManagerService {
    * Sets confirmed_category_id to NULL and unassigns the ticket, making it reappear in triage queue
    */
   async returnToTriage(ticketId: string, user: User, reason?: string): Promise<Ticket> {
-    const managerTeamId = await this.getManagerTeamId(user.id);
+    const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (!managerTeamId && !user.is_admin) {
       throw new ForbiddenException('Only Manager can return to triage');
     }
@@ -390,7 +379,7 @@ export class ManagerService {
     if (user.is_admin || user.is_support_triage) {
       return;
     }
-    const managerTeamId = await this.getManagerTeamId(user.id);
+    const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (managerTeamId !== teamId) {
       throw new ForbiddenException('No access to this team workload');
     }
@@ -404,7 +393,7 @@ export class ManagerService {
     if (user.is_admin) {
       return;
     }
-    const managerTeamId = await this.getManagerTeamId(user.id);
+    const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (managerTeamId !== teamId) {
       throw new ForbiddenException('Manager can only access own team');
     }
