@@ -206,6 +206,22 @@ export class TicketService {
     },
     requesterId: string,
   ): Promise<Ticket> {
+    // FR-11.2: deactivating a site must stop it being chosen on *new* tickets
+    // while leaving historical tickets that reference it untouched. Nothing
+    // enforced that — the site_id foreign key is satisfied by inactive rows
+    // too, so a decommissioned site could still be picked. The list endpoint
+    // deliberately still returns inactive sites (the admin screen needs them
+    // to reactivate), so the guard belongs here.
+    const [site] = await this.dataSource.query('SELECT id, active FROM sites WHERE id = $1', [
+      data.site_id,
+    ]);
+    if (!site) {
+      throw new BadRequestException('Site not found');
+    }
+    if (!site.active) {
+      throw new BadRequestException('That site is no longer active — pick a current one.');
+    }
+
     // Generate ticket number (e.g., TCK-2026-00001)
     const year = new Date().getFullYear();
     const [lastTicket] = await this.dataSource.query(

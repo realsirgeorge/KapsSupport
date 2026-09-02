@@ -1,6 +1,7 @@
 import { Avatar } from '@/components/ui/avatar';
 import { EmptyState } from '@/components/ui/empty-state';
 import { relativeTime } from '@/lib/format';
+import { priorityLabel } from './priority-badge';
 import { History } from 'lucide-react';
 
 export interface HistoryEntry {
@@ -50,6 +51,12 @@ function describe(e: HistoryEntry): string {
       return e.old_category_name
         ? `changed the category from ${e.old_category_name} to ${e.new_category_name ?? 'none'}`
         : `confirmed the category as ${e.new_category_name ?? 'none'}`;
+    case 'priority_changed': {
+      const to = priorityLabel(e.new_value);
+      return e.old_value
+        ? `changed the priority from ${priorityLabel(e.old_value)} to ${to}`
+        : `confirmed the priority as ${to}`;
+    }
     case 'site_corrected':
       return `corrected the site from ${e.old_site_name ?? 'unknown'} to ${e.new_site_name ?? 'unknown'}`;
     default:
