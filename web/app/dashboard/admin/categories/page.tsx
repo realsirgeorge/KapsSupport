@@ -1,14 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Tags, SearchX } from 'lucide-react';
 import { categoriesApi, adminApi, Category } from '@/lib/api-client';
 import { PageHeader } from '@/components/app/page-header';
 import { useUser } from '@/components/app/user-context';
 import { useRequireRole } from '@/hooks/use-require-role';
+import { useSearch } from '@/components/app/search-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageSkeleton } from '@/components/ui/skeleton';
+import { FormDialog, Field } from '@/components/ui/form-dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { toast } from 'sonner';
 
@@ -20,6 +24,8 @@ interface Team {
 export default function AdminCategoriesPage() {
   const user = useUser();
   const allowed = useRequireRole(user.is_admin);
+  const { query } = useSearch();
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -27,12 +33,10 @@ export default function AdminCategoriesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newTeamId, setNewTeamId] = useState('');
-  const [creating, setCreating] = useState(false);
 
   const [editCategory, setEditCategory] = useState<Category | null>(null);
   const [editName, setEditName] = useState('');
   const [editTeamId, setEditTeamId] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const load = () =>
     Promise.all([categoriesApi.list(), adminApi.teams.list()]).then(([catsRes, teamsRes]) => {
@@ -41,51 +45,80 @@ export default function AdminCategoriesPage() {
     });
 
   useEffect(() => {
-    load().finally(() => setIsLoading(false));
-  }, []);
+    if (!allowed) return;
+    load()
+      .catch(() => toast.error('Could not load categories'))
+      .finally(() => setIsLoading(false));
+  }, [allowed]);
 
-  const teamName = (teamId: string) => teams.find((t) => t.id === teamId)?.name ?? '—';
+  const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? 'Unknown team';
 
   const createCategory = async () => {
-    if (!newName.trim() || !newTeamId) return;
-    setCreating(true);
+    if (!newName.trim() || !newTeamId) return false;
     try {
       await adminApi.categories.create({ name: newName.trim(), team_id: newTeamId });
-      toast.success('Category created');
-      setCreateOpen(false);
+      toast.success(`Created ${newName.trim()}`);
       setNewName('');
       setNewTeamId('');
       await load();
-    } catch {
-      toast.error('Could not create category — name may already be in use');
-    } finally {
-      setCreating(false);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Could not create this category');
+      return false;
     }
   };
 
-  const openEdit = (category: Category) => {
-    setEditCategory(category);
-    setEditName(category.name);
-    setEditTeamId(category.team_id);
-  };
-
-  const saveEdit = async () => {
-    if (!editCategory) return;
-    setSaving(true);
+  const saveCategory = async () => {
+    if (!editCategory || !editName.trim() || !editTeamId) return false;
     try {
       await adminApi.categories.update(editCategory.id, { name: editName.trim(), team_id: editTeamId });
       toast.success('Category updated');
-      setEditCategory(null);
       await load();
-    } catch {
-      toast.error('Could not update category');
-    } finally {
-      setSaving(false);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Could not update this category');
+      return false;
     }
   };
 
+  const filtered = useMemo(() => {
+    if (!query.trim()) return categories;
+    const q = query.toLowerCase();
+    return categories.filter((c) => c.name.toLowerCase().includes(q));
+  }, [categories, query]);
+
+  const columns: Column<Category>[] = [
+    {
+      key: 'name',
+      header: 'Category',
+      cell: (c) => <span className="font-medium text-foreground">{c.name}</span>,
+    },
+    {
+      key: 'team',
+      header: 'Owning team',
+      cell: (c) => <span className="text-muted-foreground">{teamName(c.team_id)}</span>,
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      width: 'w-28',
+      cell: (c) => (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setEditCategory(c);
+            setEditName(c.name);
+            setEditTeamId(c.team_id);
+          }}
+        >
+          Edit
+        </Button>
+      ),
+    },
+  ];
+
   if (!allowed || isLoading) {
-    return <div className="text-muted-foreground">Loading...</div>;
+    return <PageSkeleton stats={0} rows={5} cols={3} />;
   }
 
   return (
@@ -93,108 +126,85 @@ export default function AdminCategoriesPage() {
       <PageHeader
         name={user.name}
         title="Categories"
-        subtitle="What tickets get classified as, and which team owns each one"
-        action={<Button onClick={() => setCreateOpen(true)}>+ New category</Button>}
+        subtitle="What tickets get classified as — and, through the owning team, who works them"
+        action={<Button onClick={() => setCreateOpen(true)}>New category</Button>}
       />
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th className="px-6 py-3 font-medium">Name</th>
-              <th className="px-6 py-3 font-medium">Team</th>
-              <th className="px-6 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {categories.map((cat) => (
-              <tr key={cat.id} className="border-b border-border last:border-0 hover:bg-accent/50">
-                <td className="px-6 py-3 font-medium text-foreground">{cat.name}</td>
-                <td className="px-6 py-3 text-muted-foreground">{teamName(cat.team_id)}</td>
-                <td className="px-6 py-3 text-right">
-                  <Button size="sm" variant="outline" onClick={() => openEdit(cat)}>
-                    Edit
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={filtered}
+        rowKey={(c) => c.id}
+        empty={
+          categories.length === 0 ? (
+            <EmptyState
+              icon={Tags}
+              title="No categories yet"
+              description="Tickets can't be assigned until a confirmed category routes them to a team, so add at least one."
+              action={<Button onClick={() => setCreateOpen(true)}>New category</Button>}
+            />
+          ) : (
+            <EmptyState icon={SearchX} title="No categories match your search" />
+          )
+        }
+      />
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New category</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="cat-name">Name</Label>
-              <Input id="cat-name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Team</Label>
-              <Select value={newTeamId} onValueChange={setNewTeamId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Which team owns this category?" />
-                </SelectTrigger>
-                <SelectContent>
-                  {teams.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={createCategory} disabled={creating || !newName.trim() || !newTeamId}>
-              Create
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="New category"
+        submitLabel="Create category"
+        submitDisabled={!newName.trim() || !newTeamId}
+        onSubmit={createCategory}
+      >
+        <Field label="Name" htmlFor="cat-name" required>
+          <Input id="cat-name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Networking" />
+        </Field>
+        <Field label="Owning team" required hint="Tickets in this category can only be assigned to members of this team.">
+          <Select value={newTeamId} onValueChange={setNewTeamId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Which team handles this?" />
+            </SelectTrigger>
+            <SelectContent>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </FormDialog>
 
-      <Dialog open={!!editCategory} onOpenChange={(open) => !open && setEditCategory(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit category</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-cat-name">Name</Label>
-              <Input id="edit-cat-name" value={editName} onChange={(e) => setEditName(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Team</Label>
-              <Select value={editTeamId} onValueChange={setEditTeamId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {teams.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditCategory(null)}>
-              Cancel
-            </Button>
-            <Button onClick={saveEdit} disabled={saving || !editName.trim()}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={!!editCategory}
+        onOpenChange={(o) => !o && setEditCategory(null)}
+        title={editCategory ? `Edit ${editCategory.name}` : 'Edit category'}
+        submitLabel="Save changes"
+        submitDisabled={!editName.trim() || !editTeamId}
+        onSubmit={saveCategory}
+      >
+        <Field label="Name" htmlFor="edit-cat-name" required>
+          <Input id="edit-cat-name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+        </Field>
+        <Field
+          label="Owning team"
+          required
+          hint="Moving a category to another team changes who can be assigned its tickets. Tickets already assigned to someone outside the new team will need reassigning."
+        >
+          <Select value={editTeamId} onValueChange={setEditTeamId}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </FormDialog>
     </div>
   );
 }
