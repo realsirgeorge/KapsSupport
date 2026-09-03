@@ -223,7 +223,12 @@ export default function TeamDashboardPage() {
         </Section>
         <Section title="Team workload">
           {members.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No one is on this team yet.</p>
+            <EmptyState
+              icon={Users}
+              size="compact"
+              title="No one is on this team yet"
+              description="Add members on the Users & roles screen before assigning work."
+            />
           ) : (
             <div className="space-y-3">
               {members.map((m) => (

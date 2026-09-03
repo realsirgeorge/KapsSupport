@@ -43,6 +43,13 @@ test.describe('Authentication', () => {
   });
 
   test('each role lands on its own primary screen', async ({ page }) => {
+    // Five full logins in sequence, each allowed up to 30s for a cold route
+    // compile plus another 15s to confirm the specific landing URL. The
+    // default 30s *test* timeout was for a single action, not five of them
+    // chained — it was failing this test on total duration, not on any one
+    // login actually being slow.
+    test.setTimeout(120_000);
+
     const expected: Array<[string, RegExp]> = [
       [USERS.requester, /\/dashboard\/tickets/],
       [USERS.member, /\/dashboard\/assigned/],
@@ -53,8 +60,16 @@ test.describe('Authentication', () => {
 
     for (const [email, url] of expected) {
       await login(page, email);
-      await expect(page, `${email} should land on ${url}`).toHaveURL(url);
-      await page.goto('/login'); // reset for the next role
+      // Longer than the default 5s on purpose: this is the one test that logs
+      // in five times in a row, and the assertion is about *which* screen the
+      // role lands on, not how fast the client-side push settles.
+      await expect(page, `${email} should land on ${url}`).toHaveURL(url, { timeout: 15_000 });
+
+      // Clear the session before the next role rather than just navigating
+      // back to /login. Carrying one role's cookie into the next login is a
+      // difference this test isn't trying to measure.
+      await page.context().clearCookies();
+      await page.goto('/login');
     }
   });
 });

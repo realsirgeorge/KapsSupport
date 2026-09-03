@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Paperclip, Download } from 'lucide-react';
+import { Paperclip, Download, MessageSquare, AlertTriangle } from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   ticketApi,
   attachmentsApi,
@@ -479,7 +480,12 @@ export default function TicketDetailPage() {
 
       <Section title="Comments">
         {comments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No comments yet. Add anything that might help.</p>
+          <EmptyState
+            icon={MessageSquare}
+            size="compact"
+            title="No comments yet"
+            description="Add anything that might help whoever picks this up."
+          />
         ) : (
           <ul className="space-y-3">
             {comments.map((c) => (
@@ -529,7 +535,12 @@ export default function TicketDetailPage() {
       {/* FR-8.2: every status change, assignment and reassignment, with who and when. */}
       <Section title="History">
         {historyFailed ? (
-          <p className="text-sm text-muted-foreground">Couldn&apos;t load the history. Refresh the page to try again.</p>
+          <EmptyState
+            icon={AlertTriangle}
+            size="compact"
+            title="Couldn't load the history"
+            description="This is a loading failure, not an empty trail — refresh the page to try again."
+          />
         ) : (
           <TicketTimeline entries={history} />
         )}
