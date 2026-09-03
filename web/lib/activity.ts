@@ -23,7 +23,12 @@ const STATUS_LABELS: Record<string, string> = {
 
 /** Splits into text-before-the-ticket-link, the ticket number itself, and text-after, so the UI can render only the ticket number as a link. */
 export function describeActivity(entry: ActivityEntry): { actor: string; before: string; after: string } {
-  const actor = entry.actor_name || 'Someone';
+  // A null actor means the audit trigger fired with no app.current_user_id
+  // set — a write outside withActor, e.g. a one-off manual data repair, not
+  // a real user action. TicketTimeline uses the same fallback for the same
+  // condition; keep the two in step rather than one saying "System" and the
+  // other "Someone" for an identical row.
+  const actor = entry.actor_name || 'System';
 
   switch (entry.action) {
     case 'created':
