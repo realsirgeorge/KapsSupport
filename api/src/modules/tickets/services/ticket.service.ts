@@ -2,6 +2,8 @@ import { Injectable, BadRequestException, ForbiddenException, NotFoundException 
 import { DataSource } from 'typeorm';
 import { TicketStateMachine, TicketStatus } from '../states/ticket-state-machine';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { withActor } from '../../../database/with-actor';
+import { getManagesTeamId } from '../../../database/team-management';
 
 export interface User {
   id: string;
@@ -48,23 +50,40 @@ export class TicketService {
     this.stateMachine = new TicketStateMachine();
   }
 
+
   /**
    * Shared authorization module: scope tickets by user's role and team/site.
    * Returns SQL WHERE conditions (ANDed) and their params, starting at $1.
+   *
+   * FR-3.4 (Manager sees all team tickets) and FR-4.1/4.2 (Team Member sees
+   * ONLY their own assigned + own created, never a teammate's) are
+   * different visibility rules, even though both roles have a team_id.
+   * Deriving manages_team_id here is what actually distinguishes them --
+   * checking team_id alone would (and until this fix, did) grant every
+   * plain Team Member manager-level visibility into the whole team.
    */
-  private scopeTicketsForUser(user: User): { conditions: string[]; params: any[] } {
+  private async scopeTicketsForUser(user: User): Promise<{ conditions: string[]; params: any[] }> {
     if (user.is_admin || user.is_executive || user.is_support_triage) {
       // Admin, Executive, and Support/Triage see all tickets
       return { conditions: [], params: [] };
     }
 
-    if (user.team_id) {
-      // Team Member / Manager: see own created + own team's + own assigned
+    const managesTeamId = await getManagesTeamId(this.dataSource, user.id);
+    if (managesTeamId) {
+      // Manager: own created + entire team's tickets regardless of holder (FR-3.4/3.6)
       return {
         conditions: [
-          `(ticket.requester_id = $1 OR ticket.assigned_to = $1 OR ticket.confirmed_category_id IN (SELECT id FROM categories WHERE team_id = $2))`,
+          `(ticket.requester_id = $1 OR ticket.confirmed_category_id IN (SELECT id FROM categories WHERE team_id = $2))`,
         ],
-        params: [user.id, user.team_id],
+        params: [user.id, managesTeamId],
+      };
+    }
+
+    if (user.team_id) {
+      // Team Member: ONLY tickets assigned to them + tickets they created (FR-4.1/4.2)
+      return {
+        conditions: ['(ticket.requester_id = $1 OR ticket.assigned_to = $1)'],
+        params: [user.id],
       };
     }
 
@@ -86,7 +105,7 @@ export class TicketService {
       limit?: number;
     } = {},
   ): Promise<{ data: Ticket[]; total: number; page: number; limit: number }> {
-    const scope = this.scopeTicketsForUser(user);
+    const scope = await this.scopeTicketsForUser(user);
     const conditions = [...scope.conditions];
     const params = [...scope.params];
 
@@ -143,7 +162,7 @@ export class TicketService {
    * Get a single ticket (with authorization check).
    */
   async getTicket(ticketId: string, user: User): Promise<Ticket> {
-    const scope = this.scopeTicketsForUser(user);
+    const scope = await this.scopeTicketsForUser(user);
     const params = [...scope.params, ticketId];
     const conditions = [...scope.conditions, `ticket.id = $${params.length}`];
 
@@ -187,6 +206,22 @@ export class TicketService {
     },
     requesterId: string,
   ): Promise<Ticket> {
+    // FR-11.2: deactivating a site must stop it being chosen on *new* tickets
+    // while leaving historical tickets that reference it untouched. Nothing
+    // enforced that — the site_id foreign key is satisfied by inactive rows
+    // too, so a decommissioned site could still be picked. The list endpoint
+    // deliberately still returns inactive sites (the admin screen needs them
+    // to reactivate), so the guard belongs here.
+    const [site] = await this.dataSource.query('SELECT id, active FROM sites WHERE id = $1', [
+      data.site_id,
+    ]);
+    if (!site) {
+      throw new BadRequestException('Site not found');
+    }
+    if (!site.active) {
+      throw new BadRequestException('That site is no longer active — pick a current one.');
+    }
+
     // Generate ticket number (e.g., TCK-2026-00001)
     const year = new Date().getFullYear();
     const [lastTicket] = await this.dataSource.query(
@@ -260,16 +295,18 @@ export class TicketService {
       pendingConfirmationAtClause = ', pending_confirmation_at = now()';
     }
 
-    const [updatedTicket] = await this.dataSource.query(
-      `UPDATE tickets
-       SET status = $1,
-           pending_reason = $2,
-           updated_at = now()
-           ${resolvedAtClause}
-           ${pendingConfirmationAtClause}
-       WHERE id = $3
-       RETURNING *`,
-      [finalStatus, newStatus === TicketStatus.PENDING ? pending_reason : null, ticketId],
+    const [updatedTicket] = await withActor(this.dataSource, user.id, (manager) =>
+      manager.query(
+        `UPDATE tickets
+         SET status = $1,
+             pending_reason = $2,
+             updated_at = now()
+             ${resolvedAtClause}
+             ${pendingConfirmationAtClause}
+         WHERE id = $3
+         RETURNING *`,
+        [finalStatus, newStatus === TicketStatus.PENDING ? pending_reason : null, ticketId],
+      ),
     );
 
     // Emit event for audit logging and notifications
@@ -306,17 +343,21 @@ export class TicketService {
     let updatedTicket: Ticket;
 
     if (action === 'confirm') {
-      [updatedTicket] = await this.dataSource.query(
-        `UPDATE tickets SET status = $1, closed_at = now(), updated_at = now() WHERE id = $2 RETURNING *`,
-        [TicketStatus.CLOSED, ticketId],
+      [updatedTicket] = await withActor(this.dataSource, requester.id, (manager) =>
+        manager.query(
+          `UPDATE tickets SET status = $1, closed_at = now(), updated_at = now() WHERE id = $2 RETURNING *`,
+          [TicketStatus.CLOSED, ticketId],
+        ),
       );
 
       this.eventEmitter.emit('ticket.confirmed', { ticket: updatedTicket, actor_id: requester.id });
     } else {
       // Reopen and return to same Team Member (assigned_to stays the same)
-      [updatedTicket] = await this.dataSource.query(
-        `UPDATE tickets SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
-        [TicketStatus.REOPENED, ticketId],
+      [updatedTicket] = await withActor(this.dataSource, requester.id, (manager) =>
+        manager.query(
+          `UPDATE tickets SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+          [TicketStatus.REOPENED, ticketId],
+        ),
       );
 
       this.eventEmitter.emit('ticket.disputed', {
@@ -327,5 +368,81 @@ export class TicketService {
     }
 
     return updatedTicket;
+  }
+
+  /**
+   * Recent audit trail entries across whatever tickets this user is
+   * authorized to see (same scoping as listTickets), for a "live activity"
+   * feed. actor_id can be null for history rows recorded before the
+   * app.current_user_id fix — actor_name is null in that case too.
+   */
+  async getRecentActivity(user: User, limit = 8): Promise<any[]> {
+    const scope = await this.scopeTicketsForUser(user);
+    const params = [...scope.params];
+    const whereClause = scope.conditions.length ? `WHERE ${scope.conditions.join(' AND ')}` : '';
+
+    return this.dataSource.query(
+      `SELECT h.id, h.action, h.field_changed, h.old_value, h.new_value, h.created_at,
+              ticket.ticket_number, ticket.id as ticket_id,
+              a.name as actor_name
+       FROM ticket_history h
+       JOIN tickets ticket ON h.ticket_id = ticket.id
+       LEFT JOIN users a ON h.actor_id = a.id
+       ${whereClause}
+       ORDER BY h.created_at DESC
+       LIMIT $${params.length + 1}`,
+      [...params, limit],
+    );
+  }
+
+  /**
+   * FR-8.2: the full audit trail for one ticket — every status change,
+   * assignment, and reassignment with actor and timestamp. Goes through
+   * getTicket() first so a user can only read the history of a ticket they
+   * were already allowed to see.
+   *
+   * Raw UUIDs in old_value/new_value (assignee, category, site changes) are
+   * resolved to display names here rather than in the UI, so the client
+   * doesn't need a second round-trip to make the trail readable.
+   */
+  async getTicketHistory(ticketId: string, user: User): Promise<any[]> {
+    await this.getTicket(ticketId, user); // throws 404 if not visible to this user
+
+    // old_value/new_value is a free-text column holding either a status
+    // string ('assigned') or a UUID depending on field_changed, so the
+    // ::uuid casts must never see a non-UUID. A regex guard inside a JOIN
+    // condition is not enough — Postgres does not promise to evaluate JOIN
+    // predicates left-to-right, and it did in fact attempt to cast
+    // 'assigned'. CASE *is* documented to short-circuit, and MATERIALIZED
+    // stops the planner from inlining the CTE and reordering around it.
+    return this.dataSource.query(
+      `WITH h AS MATERIALIZED (
+         SELECT id, actor_id, action, field_changed, old_value, new_value, created_at,
+                CASE WHEN old_value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                     THEN old_value::uuid END AS old_uuid,
+                CASE WHEN new_value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                     THEN new_value::uuid END AS new_uuid
+         FROM ticket_history
+         WHERE ticket_id = $1
+       )
+       SELECT h.id, h.action, h.field_changed, h.old_value, h.new_value, h.created_at,
+              a.name  AS actor_name,
+              ov.name AS old_value_name,
+              nv.name AS new_value_name,
+              oc.name AS old_category_name,
+              nc.name AS new_category_name,
+              os.name AS old_site_name,
+              ns.name AS new_site_name
+       FROM h
+       LEFT JOIN users a       ON a.id  = h.actor_id
+       LEFT JOIN users ov      ON h.field_changed = 'assigned_to'           AND ov.id = h.old_uuid
+       LEFT JOIN users nv      ON h.field_changed = 'assigned_to'           AND nv.id = h.new_uuid
+       LEFT JOIN categories oc ON h.field_changed = 'confirmed_category_id' AND oc.id = h.old_uuid
+       LEFT JOIN categories nc ON h.field_changed = 'confirmed_category_id' AND nc.id = h.new_uuid
+       LEFT JOIN sites os      ON h.field_changed = 'site_id'               AND os.id = h.old_uuid
+       LEFT JOIN sites ns      ON h.field_changed = 'site_id'               AND ns.id = h.new_uuid
+       ORDER BY h.created_at ASC`,
+      [ticketId],
+    );
   }
 }

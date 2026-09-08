@@ -52,6 +52,25 @@ export class TicketsController {
   }
 
   /**
+   * GET /v1/tickets/activity - Recent audit trail entries (role-scoped),
+   * for a "live activity" feed. Declared before :id so it isn't shadowed.
+   */
+  @Get('activity')
+  async getRecentActivity(@Request() req, @Query('limit') limit?: number) {
+    const data = await this.ticketService.getRecentActivity(req.user, limit ? Number(limit) : undefined);
+    return { data };
+  }
+
+  /**
+   * GET /v1/tickets/:id/history - Full audit trail for one ticket (FR-8.2)
+   */
+  @Get(':id/history')
+  async getHistory(@Param('id') id: string, @Request() req) {
+    const data = await this.ticketService.getTicketHistory(id, req.user);
+    return { data };
+  }
+
+  /**
    * GET /v1/tickets/:id - Get single ticket
    */
   @Get(':id')

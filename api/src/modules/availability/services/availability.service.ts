@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { getManagesTeamId } from '../../../database/team-management';
 
 /**
  * User interface for authorization checks
@@ -46,6 +47,7 @@ export class AvailabilityService {
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
   ) {}
+
 
   /**
    * POST /availability-requests - Team Member requests leave
@@ -140,14 +142,16 @@ export class AvailabilityService {
     const conditions: string[] = [];
     const params: any[] = [];
 
+    const managesTeamId = await getManagesTeamId(this.dataSource, user.id);
+
     if (user.is_admin || user.is_support_triage) {
       // Admin and Support/Triage see all requests
-    } else if (user.team_id) {
-      // Manager sees only own team's requests
-      params.push(user.team_id);
+    } else if (managesTeamId) {
+      // Manager sees own team's requests
+      params.push(managesTeamId);
       conditions.push(`ar.user_id IN (SELECT id FROM users WHERE team_id = $${params.length})`);
     } else {
-      // Non-team-member without admin: only see own requests
+      // Everyone else (including regular team members): only see own requests
       params.push(user.id);
       conditions.push(`ar.user_id = $${params.length}`);
     }
@@ -160,7 +164,11 @@ export class AvailabilityService {
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const data = await this.dataSource.query(
-      `SELECT ar.* FROM availability_requests ar ${whereClause} ORDER BY ar.requested_at DESC`,
+      `SELECT ar.*, u.name as requester_name
+       FROM availability_requests ar
+       JOIN users u ON ar.user_id = u.id
+       ${whereClause}
+       ORDER BY ar.requested_at DESC`,
       params,
     );
 
@@ -196,8 +204,11 @@ export class AvailabilityService {
     }
 
     // Authorization: Only manager of the user's team or admin can approve
-    if (!approvingUser.is_admin && approvingUser.team_id !== requestingUser.team_id) {
-      throw new ForbiddenException('Can only approve requests for your team');
+    if (!approvingUser.is_admin) {
+      const managesTeamId = await getManagesTeamId(this.dataSource, approvingUser.id);
+      if (!managesTeamId || managesTeamId !== requestingUser.team_id) {
+        throw new ForbiddenException('Can only approve requests for your team');
+      }
     }
 
     // Validate request status
@@ -257,8 +268,11 @@ export class AvailabilityService {
     }
 
     // Authorization: Only manager of the user's team or admin can reject
-    if (!rejectingUser.is_admin && rejectingUser.team_id !== requestingUser.team_id) {
-      throw new ForbiddenException('Can only reject requests for your team');
+    if (!rejectingUser.is_admin) {
+      const managesTeamId = await getManagesTeamId(this.dataSource, rejectingUser.id);
+      if (!managesTeamId || managesTeamId !== requestingUser.team_id) {
+        throw new ForbiddenException('Can only reject requests for your team');
+      }
     }
 
     // Validate request status
@@ -320,8 +334,9 @@ export class AvailabilityService {
     // 2. You are the manager of the team, OR
     // 3. You are admin
     const isRequester = endingUser.id === request.user_id;
-    const isManagerOfTeam = !endingUser.is_admin && endingUser.team_id === requestingUser.team_id;
     const isAdmin = endingUser.is_admin;
+    const managesTeamId = isRequester || isAdmin ? null : await getManagesTeamId(this.dataSource, endingUser.id);
+    const isManagerOfTeam = !!managesTeamId && managesTeamId === requestingUser.team_id;
 
     if (!isRequester && !isManagerOfTeam && !isAdmin) {
       throw new ForbiddenException('Can only end your own requests or requests in your team');

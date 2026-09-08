@@ -12,6 +12,8 @@ import { ManagerModule } from './modules/manager/manager.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TriageModule } from './modules/triage/triage.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AttachmentsModule } from './modules/attachments/attachments.module';
+import { CommentsModule } from './modules/comments/comments.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { AdminModule } from './modules/admin/admin.module';
     DashboardModule,
     TriageModule,
     AdminModule,
+    AttachmentsModule,
+    CommentsModule,
   ],
   controllers: [],
   providers: [],

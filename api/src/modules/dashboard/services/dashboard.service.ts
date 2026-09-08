@@ -1,5 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { getManagesTeamId } from '../../../database/team-management';
+import { OPEN_STATUSES } from '../../tickets/states/ticket-state-machine';
 
 export interface User {
   id: string;
@@ -9,27 +11,10 @@ export interface User {
   is_support_triage: boolean;
 }
 
-/**
- * Open statuses: 'new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened'
- * (excludes 'pending_confirmation' and 'closed' since they're terminal states)
- */
-const OPEN_STATUSES = ['new', 'assigned', 'in_progress', 'pending', 'resolved', 'reopened'];
-
 @Injectable()
 export class DashboardService {
   constructor(private dataSource: DataSource) {}
 
-  /**
-   * Helper: Get manager's team ID if user is a manager.
-   * Returns the team ID of a team where user is the manager.
-   */
-  private async getManagerTeamId(userId: string): Promise<string | null> {
-    const result = await this.dataSource.query(
-      'SELECT id FROM teams WHERE manager_id = $1 LIMIT 1',
-      [userId],
-    );
-    return result.length > 0 ? result[0].id : null;
-  }
 
   /**
    * Helper: Compute pending_confirmation_days for a given date.
@@ -102,27 +87,24 @@ export class DashboardService {
         count: parseInt(row.count || '0', 10),
       }));
 
-    // By status: open statuses as-is, plus pending_confirmation, plus closed in the last 30 days
+    // How many tickets are sitting in each status right now — one row per
+    // status, counting every ticket, no windowing. It used to splice in a
+    // separately-queried `closed` count limited to the last 30 days, disclosed
+    // only by the frontend labelling that one tile "Closed (30d)". Seven
+    // all-time counts and one 30-day count in the same row is a comparison the
+    // reader can't make; keeping the closed tile small is a presentation
+    // concern and doesn't belong in the query.
     const byStatusResult = await this.dataSource.query(
-      `SELECT status, COUNT(*) as count
+      `SELECT status, COUNT(*)::INTEGER as count
       FROM tickets
-      WHERE status = ANY($1::text[]) OR status = 'pending_confirmation'
       GROUP BY status
       ORDER BY status`,
-      [OPEN_STATUSES],
     );
 
-    const closedLast30Result = await this.dataSource.query(
-      `SELECT COUNT(*) as count FROM tickets WHERE status = 'closed' AND closed_at >= now() - INTERVAL '30 days'`,
-    );
-
-    const by_status = [
-      ...byStatusResult.map((row) => ({
-        status: row.status,
-        count: parseInt(row.count || '0', 10),
-      })),
-      { status: 'closed', count: parseInt(closedLast30Result[0].count || '0', 10) },
-    ];
+    const by_status = byStatusResult.map((row) => ({
+      status: row.status,
+      count: row.count,
+    }));
 
     return { total_open, aging_over_3_days, resolved_this_month, avg_resolution_hours, by_team, by_status };
   }
@@ -166,15 +148,28 @@ export class DashboardService {
     }
 
     // Manager (must check this before Team Member)
-    const managerTeamId = await this.getManagerTeamId(user.id);
+    const managerTeamId = await getManagesTeamId(this.dataSource, user.id);
     if (managerTeamId) {
-      const [team_open, my_requests_open] = await Promise.all([
+      const [team_open, team_aging_over_3_days, my_requests_open] = await Promise.all([
         // Tickets in this manager's team
         this.dataSource
           .query(
             `SELECT COUNT(*) as count FROM tickets tk
            JOIN categories c ON tk.confirmed_category_id = c.id
            WHERE c.team_id = $1 AND tk.status = ANY($2::text[])`,
+            [managerTeamId, OPEN_STATUSES],
+          )
+          .then((r) => parseInt(r[0].count || '0', 10)),
+        // Of those, the ones that have been open more than 3 days. This is what
+        // feeds the manager's attention badge: `team_open` alone is a workload
+        // number that is never zero and so never means "look at this", whereas
+        // the aging subset is the same thing every other role's badge counts.
+        this.dataSource
+          .query(
+            `SELECT COUNT(*) as count FROM tickets tk
+           JOIN categories c ON tk.confirmed_category_id = c.id
+           WHERE c.team_id = $1 AND tk.status = ANY($2::text[])
+             AND (now() - tk.created_at) > INTERVAL '3 days'`,
             [managerTeamId, OPEN_STATUSES],
           )
           .then((r) => parseInt(r[0].count || '0', 10)),
@@ -187,7 +182,7 @@ export class DashboardService {
           .then((r) => parseInt(r[0].count || '0', 10)),
       ]);
 
-      return { team_open, my_requests_open };
+      return { team_open, team_aging_over_3_days, my_requests_open };
     }
 
     // Team Member (has team_id)

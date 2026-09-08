@@ -9,3 +9,10 @@ build/
 .next/
 *.log
 .superpowers/
+
+# TypeScript incremental build cache — regenerated on every build
+*.tsbuildinfo
+
+# Playwright run artifacts
+test-results/
+playwright-report/

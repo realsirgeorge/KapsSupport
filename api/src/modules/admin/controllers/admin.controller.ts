@@ -197,7 +197,7 @@ export class AdminUsersController {
   @Patch(':id/roles')
   async updateUserRoles(
     @Param('id') id: string,
-    @Body() body: { is_admin?: boolean; is_support_triage?: boolean; is_executive?: boolean },
+    @Body() body: { is_admin?: boolean; is_support_triage?: boolean; is_executive?: boolean; team_id?: string | null },
     @Request() req: any,
   ) {
     const result = await this.adminService.updateUserRoles(req.user, id, body);
